@@ -14,7 +14,7 @@ can see how the pieces fit instead of stitching them together yourself.
 | --- | --- | --- |
 | Auth | `src/acme_mcp/auth.py` | `JWTVerifier` in prod, `StaticTokenVerifier` for local dev; the group → tag map |
 | Per-group access | `src/acme_mcp/access.py` | `GroupTagFilter` middleware: hides tools **and** blocks calls to hidden ones |
-| Audit trail | `src/acme_mcp/audit.py` | `AuditLog` middleware logging user / tool / timing on every call |
+| Audit trail | `src/acme_mcp/audit.py` | `AuditLog` middleware logging user / groups / tool / timing on every call |
 | Deterministic domains | `src/acme_mcp/domains/{orders,billing,admin}.py` | plain typed tools over a data backend |
 | Agent behind a tool | `src/acme_mcp/domains/support.py` + `agents.py` | an injectable, mockable inner agent on a tight leash |
 | File delivery | `src/acme_mcp/domains/reports.py` + `storage.py` | upload to S3, return a short-lived signed URL — never the bytes |

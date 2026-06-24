@@ -26,6 +26,10 @@ class AuditLog(Middleware):
     async def on_call_tool(self, context: MiddlewareContext, call_next):
         token = get_access_token()
         user = token.claims.get("sub") if token else "anon"
+        # Record the caller's groups too: "who did it" is the subject, but "what
+        # were they cleared as" is what answers whether an access decision was
+        # right after the fact.
+        groups = token.claims.get("groups", []) if token else []
         tool = context.message.name
         start = time.perf_counter()
         error: str | None = None
@@ -38,5 +42,5 @@ class AuditLog(Middleware):
             ms = round((time.perf_counter() - start) * 1000)
             log.info(
                 "tool_call",
-                extra={"user": user, "tool": tool, "ms": ms, "error": error},
+                extra={"user": user, "groups": groups, "tool": tool, "ms": ms, "error": error},
             )

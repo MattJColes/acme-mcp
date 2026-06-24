@@ -107,3 +107,28 @@ async def test_export_report_tool_is_tagged_reports():
         tools = {t.name: t for t in await client.list_tools()}
     assert "export_report" in tools
     assert "reports" in _tags(tools["export_report"])
+
+
+import pytest
+
+
+@pytest.mark.parametrize("report_id", ["", "  ", "../secret", "a/b", "a\\b"])
+async def test_export_report_rejects_unsafe_report_id(report_id):
+    """report_id becomes part of the S3 key, so path-y or blank ids are rejected.
+
+    The upload must never run for a rejected id -- a bad id should fail before any
+    object is written, not produce a key outside the reports/ prefix.
+    """
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket=BUCKET)
+        reports.set_s3_client(s3)
+        try:
+            async with Client(reports.reports_server) as client:
+                with pytest.raises(Exception):
+                    await client.call_tool("export_report", {"report_id": report_id})
+            # No object should have been written under the reports/ prefix.
+            listed = s3.list_objects_v2(Bucket=BUCKET)
+            assert listed.get("KeyCount", 0) == 0
+        finally:
+            reports.set_s3_client(None)

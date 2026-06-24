@@ -19,6 +19,7 @@ its own.
 from __future__ import annotations
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 
 from acme_mcp import storage
 
@@ -57,7 +58,16 @@ def export_report(report_id: str) -> dict:
     ``download_url`` plus ``expires_in`` (seconds). The file bytes are NEVER
     returned -- delivering large files through the model's context is slow and
     expensive, so the bytes go around the model via the signed URL.
+
+    ``report_id`` becomes part of the S3 key, so it is validated: a blank id or
+    one carrying path separators is rejected rather than used to build a key
+    outside the ``reports/`` prefix the signer is scoped to.
     """
+    if not report_id or not report_id.strip():
+        raise ToolError("report_id is required")
+    if "/" in report_id or "\\" in report_id or ".." in report_id:
+        raise ToolError("report_id must not contain path separators")
+
     key = f"reports/{report_id}.pdf"
     data = _build_report(report_id)
 
