@@ -6,6 +6,7 @@ prove the proxy mechanism works in-memory (pointing it at a local sub-server)
 without standing up a real remote service.
 """
 
+import pytest
 from fastmcp import Client, FastMCP
 
 from acme_mcp.server import build_server
@@ -50,7 +51,51 @@ async def test_proxy_can_be_mounted_into_main_server():
     main = build_server(env="dev")
     main.mount(create_proxy(analytics))
 
-    # analytics isn't in any group's tag set, so it stays hidden from the filter,
-    # but the mount itself succeeds and the tool is registered on the server.
+    # The mount itself succeeds and the tool is registered on the server.
     tool = await main.get_tool("health")
     assert tool is not None
+
+
+async def test_admin_can_reach_a_later_composed_domain():
+    """admin is a wildcard, so a proxied domain mounted later is reachable.
+
+    Regression test: admin used to be an explicit list of the built-in domains,
+    so a composed domain carrying a new tag (here ``analytics``) was invisible
+    and uncallable even to admin -- contradicting "admin sees everything".
+    """
+    analytics = FastMCP("analytics")
+
+    @analytics.tool(tags={"analytics"})
+    def top_products(limit: int = 3) -> list[str]:
+        return ["widget", "gadget", "gizmo"][:limit]
+
+    main = build_server(env="dev")
+    main.mount(create_proxy(analytics))
+
+    with as_caller(groups=["admin"]):
+        async with Client(main) as client:
+            names = {t.name for t in await client.list_tools()}
+            assert "top_products" in names
+            result = await client.call_tool("top_products", {"limit": 2})
+    # Payload rides in content even though structured data isn't re-parsed
+    # through a proxy-of-a-proxy hop; the point is the call is permitted.
+    assert result.content[0].text == '["widget","gadget"]'
+
+
+async def test_non_admin_still_cannot_reach_composed_domain():
+    """The wildcard is admin-only: other groups stay walled off from analytics."""
+    analytics = FastMCP("analytics")
+
+    @analytics.tool(tags={"analytics"})
+    def top_products(limit: int = 3) -> list[str]:
+        return ["widget", "gadget", "gizmo"][:limit]
+
+    main = build_server(env="dev")
+    main.mount(create_proxy(analytics))
+
+    with as_caller(groups=["support"]):
+        async with Client(main) as client:
+            names = {t.name for t in await client.list_tools()}
+            assert "top_products" not in names
+            with pytest.raises(Exception):
+                await client.call_tool("top_products", {"limit": 2})

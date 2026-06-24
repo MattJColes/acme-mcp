@@ -100,3 +100,32 @@ async def test_issue_refund_records_refund():
         assert refunds[0]["amount"] == 12.0
     finally:
         admin._backend = admin.AdminBackend()
+
+
+@pytest.mark.parametrize("amount", [0, -1, -0.01])
+async def test_issue_refund_rejects_non_positive_amount(amount):
+    """The money tool must not record a zero or negative refund."""
+    backend = admin.AdminBackend()
+    admin._backend = backend
+    try:
+        async with Client(admin.admin_server) as client:
+            with pytest.raises(Exception):
+                await client.call_tool(
+                    "issue_refund", {"order_id": "A1", "amount": amount}
+                )
+        # Nothing should have been written.
+        assert backend.list_refunds() == []
+    finally:
+        admin._backend = admin.AdminBackend()
+
+
+async def test_issue_refund_rejects_blank_order_id():
+    backend = admin.AdminBackend()
+    admin._backend = backend
+    try:
+        async with Client(admin.admin_server) as client:
+            with pytest.raises(Exception):
+                await client.call_tool("issue_refund", {"order_id": "  ", "amount": 5.0})
+        assert backend.list_refunds() == []
+    finally:
+        admin._backend = admin.AdminBackend()

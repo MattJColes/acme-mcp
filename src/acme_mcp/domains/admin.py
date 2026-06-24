@@ -10,7 +10,10 @@ something with the same ``record_refund`` shape.
 
 from __future__ import annotations
 
+import math
+
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 
 admin_server = FastMCP("admin")
 
@@ -46,7 +49,16 @@ def issue_refund(order_id: str, amount: float) -> dict:
     """Issue a refund against an order (privileged write).
 
     Records the refund in the backend and returns a confirmation with the
-    refunded amount and a ``"refund_issued"`` status.
+    refunded amount and a ``"refund_issued"`` status. Because this is the one
+    tool that moves money, it validates its inputs before writing: a blank order
+    id or a non-positive / non-finite amount is rejected rather than recorded.
     """
+    if not order_id or not order_id.strip():
+        raise ToolError("order_id is required")
+    # ``bool`` is a subclass of ``int``; reject it so True/False can't pass as 1/0.
+    if isinstance(amount, bool) or not isinstance(amount, (int, float)):
+        raise ToolError("amount must be a number")
+    if not math.isfinite(amount) or amount <= 0:
+        raise ToolError("amount must be a positive, finite number")
     _backend.record_refund(order_id, amount)
     return {"order_id": order_id, "refunded": amount, "status": "refund_issued"}

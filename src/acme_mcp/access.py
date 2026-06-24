@@ -25,7 +25,19 @@ from collections.abc import Sequence
 from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 
-from acme_mcp.auth import allowed_tags
+from acme_mcp.auth import ALL_TAGS, allowed_tags
+
+
+def cleared_for(tool_tags, allowed) -> bool:
+    """Whether a caller cleared for ``allowed`` may use a tool tagged ``tool_tags``.
+
+    The caller is cleared if they hold the wildcard (``ALL_TAGS``, e.g. admin) or
+    if any of the tool's tags is in their allowed set. Using a helper keeps the
+    list and call paths enforcing exactly the same rule.
+    """
+    if ALL_TAGS in allowed:
+        return True
+    return bool(set(tool_tags) & allowed)
 
 
 class GroupTagFilter(Middleware):
@@ -34,13 +46,13 @@ class GroupTagFilter(Middleware):
     async def on_list_tools(self, context: MiddlewareContext, call_next) -> Sequence:
         tools = await call_next(context)
         tags = allowed_tags()
-        return [t for t in tools if t.tags & tags]
+        return [t for t in tools if cleared_for(t.tags, tags)]
 
     async def on_call_tool(self, context: MiddlewareContext, call_next):
         name = context.message.name
         tags = allowed_tags()
         tool = await context.fastmcp_context.fastmcp.get_tool(name)
-        if not (tool and tool.tags & tags):
+        if not (tool and cleared_for(tool.tags, tags)):
             # Same answer whether the tool is unknown or just off-limits: don't
             # leak the existence of tools the caller isn't cleared for.
             raise ToolError(f"Unknown tool: {name}")

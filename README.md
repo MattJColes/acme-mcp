@@ -69,6 +69,10 @@ Every request is authenticated, then two middleware run:
 Tools are tagged by domain (`orders`, `billing`, `admin`, `support`, `reports`);
 `GROUP_TAGS` in `auth.py` maps each org group to the tags it may use. The
 identity tool `whoami` is tagged `public` so any authenticated caller can see it.
+The `admin` group is cleared for the wildcard tag (`ALL_TAGS`) rather than an
+explicit domain list, so it stays a true superset — including a later-composed
+domain such as the proxied `analytics` service — without anyone having to edit
+its tag list each time a domain is added.
 
 > **Note on the post's `Transform`:** the draft post sketches this filter as a
 > `Transform`/`add_transform`. This repo implements it as FastMCP **middleware**
