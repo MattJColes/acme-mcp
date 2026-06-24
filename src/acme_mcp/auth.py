@@ -20,12 +20,22 @@ import os
 from fastmcp.server.auth.providers.jwt import JWTVerifier, StaticTokenVerifier
 from fastmcp.server.dependencies import get_access_token
 
+# Sentinel tag meaning "every tag, including ones from domains added later".
+# A group cleared for it sees and can call every tool regardless of the tool's
+# own tags -- that is what "admin sees everything" actually requires. Listing the
+# domains explicitly (as admin used to) silently drops any domain composed in
+# later, e.g. the proxied analytics service, which carries the ``analytics`` tag
+# that no explicit list mentioned.
+ALL_TAGS = "*"
+
 # Which tool tags each org group is allowed to see and call. Tags name a domain
 # (orders, billing, ...); a group is cleared for the union of its tags' domains.
+# ``admin`` is cleared for the wildcard so it stays a true superset as new
+# domains are mounted, rather than needing this list edited for each one.
 GROUP_TAGS: dict[str, set[str]] = {
     "support": {"orders", "billing", "support", "reports"},
     "finance": {"billing", "reports"},
-    "admin": {"orders", "billing", "support", "admin", "reports"},
+    "admin": {ALL_TAGS},
 }
 
 
@@ -40,7 +50,9 @@ def allowed_tags() -> set[str]:
     Reads ``groups`` from the verified access token. An unauthenticated caller
     gets nothing (the default is "see nothing"). An authenticated caller always
     gets ``PUBLIC_TAGS`` plus the union of the tags their groups map to, so an
-    unknown group still sees identity/health tools but no business domains.
+    unknown group still sees identity/health tools but no business domains. A
+    group cleared for ``ALL_TAGS`` (e.g. ``admin``) yields a set containing the
+    wildcard; :func:`acme_mcp.access.cleared_for` treats that as "every tag".
     """
     token = get_access_token()
     if token is None:

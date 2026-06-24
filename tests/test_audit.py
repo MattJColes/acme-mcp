@@ -33,6 +33,7 @@ async def test_audit_logs_user_tool_and_timing(caplog):
     assert len(records) == 1
     rec = records[0]
     assert rec.user == "alice@acme.test"
+    assert rec.groups == ["support"]
     assert rec.tool == "ping"
     assert isinstance(rec.ms, int)
     assert rec.error is None
@@ -44,6 +45,7 @@ async def test_audit_records_anon_when_unauthenticated(caplog):
         await client.call_tool("ping", {})
     rec = next(r for r in caplog.records if r.name == "acme_mcp.audit")
     assert rec.user == "anon"
+    assert rec.groups == []
 
 
 async def test_audit_records_errors(caplog):

@@ -60,6 +60,22 @@ async def test_support_cannot_call_refund_even_by_name(server):
                 await client.call_tool("issue_refund", {"order_id": "A1", "amount": 9.99})
 
 
+async def test_unknown_group_sees_only_public_and_cannot_call_business_tools(server):
+    """An authenticated caller in a group no one mapped gets identity tools only.
+
+    Default-deny: an unrecognised group resolves to just PUBLIC_TAGS, so business
+    tools are both hidden and uncallable even when named directly.
+    """
+    with as_caller(groups=["nobody"]):
+        async with Client(server) as client:
+            names = {t.name for t in await client.list_tools()}
+            assert names == {"whoami"}
+            with pytest.raises(Exception):
+                await client.call_tool("order_status", {"order_id": "A1"})
+            with pytest.raises(Exception):
+                await client.call_tool("issue_refund", {"order_id": "A1", "amount": 5.0})
+
+
 def test_build_auth_dev_is_static_verifier():
     assert isinstance(build_auth("dev"), StaticTokenVerifier)
 
