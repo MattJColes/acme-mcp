@@ -101,13 +101,13 @@ def export_report(report_id: str) -> dict:
             expires_in=EXPORT_EXPIRES_IN,
             client=_s3_client,
         )
-    except ToolError:
-        raise
     except Exception:
         # Never surface raw storage/AWS errors to the caller (and thus the
         # model): a boto ``ClientError`` carries the bucket name, the operation,
         # and the AWS error code -- internal detail that should stay server-side.
-        # Log it for operators, return an opaque failure to the caller.
+        # Log it for operators, return an opaque failure to the caller. Only the
+        # storage calls run in this block, and they raise boto/OS errors, never
+        # ``ToolError`` -- the input ``ToolError``s are raised above, before the try.
         log.exception("export_report failed for report_id=%r", report_id)
         raise ToolError("report export failed") from None
     return {"download_url": url, "expires_in": EXPORT_EXPIRES_IN}

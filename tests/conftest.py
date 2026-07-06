@@ -51,3 +51,8 @@ def server():
     from acme_mcp.server import build_server
 
     return build_server(env="dev")
+
+
+def tool_tags(tool) -> set[str]:
+    """Tags as carried on the client-side tool representation (under meta)."""
+    return set((tool.meta or {}).get("fastmcp", {}).get("tags", []))

@@ -97,9 +97,7 @@ async def test_export_report_actually_uploads_object():
             reports.set_s3_client(None)
 
 
-def _tags(tool) -> set:
-    """Tags as carried on the client-side tool representation (under meta)."""
-    return set((tool.meta or {}).get("fastmcp", {}).get("tags", []))
+from tests.conftest import tool_tags as _tags
 
 
 async def test_export_report_tool_is_tagged_reports():

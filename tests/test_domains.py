@@ -16,9 +16,7 @@ from acme_mcp.domains import admin, billing, orders
 
 # --- tagging contract -------------------------------------------------------
 
-def _tags(tool) -> set[str]:
-    """Tags as carried on the client-side tool representation (under meta)."""
-    return set((tool.meta or {}).get("fastmcp", {}).get("tags", []))
+from tests.conftest import tool_tags as _tags
 
 
 async def test_orders_tools_tagged_orders():
