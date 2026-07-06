@@ -57,9 +57,36 @@ def allowed_tags() -> set[str]:
     token = get_access_token()
     if token is None:
         return set()
-    groups = token.claims.get("groups", [])
+    groups = _normalize_groups(token.claims.get("groups"))
     tags = set().union(*(GROUP_TAGS.get(g, set()) for g in groups), set())
     return tags | PUBLIC_TAGS
+
+
+def _normalize_groups(groups) -> list[str]:
+    """Coerce the ``groups`` claim into a clean list of group names.
+
+    IdP tokens are not as tidy as the happy path assumes, and this value drives
+    an access decision, so it must never crash or misbehave on odd input:
+
+    * ``None`` (an explicit ``"groups": null`` in the token) or a missing claim
+      -> no groups. ``dict.get(..., [])`` does *not* cover the explicit-null
+      case, so iterating it directly would raise ``TypeError`` and surface a raw
+      500-style error to the caller.
+    * a bare string (an IdP that emits a single group as ``"admin"`` rather than
+      ``["admin"]``) -> a one-element list. Iterating the string directly would
+      loop over its *characters*, match nothing, and silently lock the user out.
+    * any other unexpected type -> no groups (fail closed).
+
+    Every path fails closed: a caller can never gain tags from malformed input,
+    only lose them, so this hardens availability without weakening access.
+    """
+    if groups is None:
+        return []
+    if isinstance(groups, str):
+        return [groups]
+    if isinstance(groups, (list, tuple, set)):
+        return [g for g in groups if isinstance(g, str)]
+    return []
 
 
 # Tokens for local development only. Never ship these — they are the moral

@@ -76,6 +76,72 @@ async def test_unknown_group_sees_only_public_and_cannot_call_business_tools(ser
                 await client.call_tool("issue_refund", {"order_id": "A1", "amount": 5.0})
 
 
+async def test_null_groups_claim_does_not_crash(server):
+    """A token with ``groups: null`` must fail closed, not raise a 500.
+
+    ``dict.get("groups", [])`` returns ``None`` (not the default) when the key is
+    present-but-null, and iterating ``None`` would raise ``TypeError`` that
+    surfaces to the caller. The caller should instead be treated as group-less.
+    """
+    from mcp.server.auth.middleware.auth_context import (
+        AccessToken,
+        AuthenticatedUser,
+        auth_context_var,
+    )
+
+    token = AccessToken(
+        token="t", client_id="u", scopes=[], claims={"sub": "u", "groups": None}
+    )
+    reset = auth_context_var.set(AuthenticatedUser(token))
+    try:
+        async with Client(server) as client:
+            names = {t.name for t in await client.list_tools()}
+            assert names == {"whoami"}  # public only, no crash
+            result = await client.call_tool("whoami", {})
+    finally:
+        auth_context_var.reset(reset)
+    assert result.data == {"user": "u", "groups": None}
+
+
+async def test_scalar_string_groups_claim_is_treated_as_one_group(server):
+    """A bare-string ``groups`` claim ("admin") must not be iterated per-character.
+
+    Some IdPs emit a single group as a string rather than a one-element list.
+    Iterating the string would loop over characters, match no group, and lock the
+    caller out. It should be treated as the single group it names.
+    """
+    from mcp.server.auth.middleware.auth_context import (
+        AccessToken,
+        AuthenticatedUser,
+        auth_context_var,
+    )
+
+    token = AccessToken(
+        token="t", client_id="u", scopes=[], claims={"sub": "u", "groups": "admin"}
+    )
+    reset = auth_context_var.set(AuthenticatedUser(token))
+    try:
+        async with Client(server) as client:
+            names = {t.name for t in await client.list_tools()}
+            # "admin" resolves to the admin group -> sees the refund tool.
+            assert "issue_refund" in names
+    finally:
+        auth_context_var.reset(reset)
+
+
+def test_normalize_groups_fails_closed_on_odd_types():
+    from acme_mcp.auth import _normalize_groups
+
+    assert _normalize_groups(None) == []
+    assert _normalize_groups("admin") == ["admin"]
+    assert _normalize_groups(["a", "b"]) == ["a", "b"]
+    assert _normalize_groups(("a",)) == ["a"]
+    # Non-string members are dropped; wholly unexpected types yield no groups.
+    assert _normalize_groups([1, "a", None]) == ["a"]
+    assert _normalize_groups(123) == []
+    assert _normalize_groups({"a": 1}) == []
+
+
 def test_build_auth_dev_is_static_verifier():
     assert isinstance(build_auth("dev"), StaticTokenVerifier)
 
