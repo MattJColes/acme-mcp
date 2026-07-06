@@ -1,0 +1,63 @@
+name: spec-drift
+
+# Non-blocking spec drift gate (see AGENTS.md). Warns when anchored code
+# changed but its spec section didn't (DRIFT), or when an anchor rule that
+# matched at the merge-base no longer matches (DANGLING, usually a rename).
+# A stale spec isn't a broken build, so this never fails the PR.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  drift-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install gate dependencies
+        run: |
+          pip install pyyaml
+          npm install -g @ast-grep/cli@0.44.1
+
+      - name: Anchor hygiene (dangling / loose / orphan rules)
+        continue-on-error: true
+        run: python scripts/spec_drift_gate.py --check-anchors
+
+      - name: Drift gate
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          BASE=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+          python scripts/spec_drift_gate.py --gate --base "$BASE" \
+            --summary-file spec-drift-summary.md
+
+      - name: Comment warnings on the PR
+        if: hashFiles('spec-drift-summary.md') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- spec-drift-gate -->';
+            const body = marker + '\n' +
+              fs.readFileSync('spec-drift-summary.md', 'utf8');
+            const {owner, repo} = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.rest.issues.listComments(
+              {owner, repo, issue_number});
+            const mine = comments.data.find(c => c.body.startsWith(marker));
+            if (mine) {
+              await github.rest.issues.updateComment(
+                {owner, repo, comment_id: mine.id, body});
+            } else {
+              await github.rest.issues.createComment(
+                {owner, repo, issue_number, body});
+            }

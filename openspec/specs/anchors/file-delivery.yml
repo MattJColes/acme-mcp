@@ -1,0 +1,19 @@
+# ast-grep anchors for openspec/specs/file-delivery/spec.md
+
+reports.export-report:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^export_report$' }
+  files: [src/**/*.py]
+
+storage.presigned-url:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^presigned_url$' }
+  files: [src/**/*.py]
+
+storage.upload-bytes:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^upload_bytes$' }
+  files: [src/**/*.py]

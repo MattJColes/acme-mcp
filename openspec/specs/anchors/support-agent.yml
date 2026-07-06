@@ -1,0 +1,19 @@
+# ast-grep anchors for openspec/specs/support-agent/spec.md
+
+support.macro:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^support_macro$' }
+  files: [src/**/*.py]
+
+support.draft-refund-email:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^draft_refund_email$' }
+  files: [src/**/*.py]
+
+support.agent-seam:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^set_agent$' }
+  files: [src/**/*.py]

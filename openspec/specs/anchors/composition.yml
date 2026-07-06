@@ -1,0 +1,23 @@
+# ast-grep anchors for openspec/specs/composition/spec.md
+
+# `all` with a body constraint: a lazy re-export wrapper in __init__.py also
+# defines build_server, so the anchor pins the definition that mounts domains.
+composition.build-server:
+  rule:
+    kind: function_definition
+    all:
+      - has: { field: name, regex: '^build_server$' }
+      - has: { pattern: mcp.mount($SUB), stopBy: end }
+  files: [src/**/*.py]
+
+composition.analytics-proxy:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^mount_analytics$' }
+  files: [src/**/*.py]
+
+composition.whoami:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^whoami$' }
+  files: [src/**/*.py]
