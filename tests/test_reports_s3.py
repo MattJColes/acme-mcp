@@ -112,7 +112,23 @@ async def test_export_report_tool_is_tagged_reports():
 import pytest
 
 
-@pytest.mark.parametrize("report_id", ["", "  ", "../secret", "a/b", "a\\b"])
+@pytest.mark.parametrize(
+    "report_id",
+    [
+        "",
+        "  ",
+        "../secret",
+        "a/b",
+        "a\\b",
+        " x ",          # surrounding whitespace would land in the S3 key verbatim
+        "x y",          # embedded whitespace
+        "q1\x00null",   # NUL byte -> corrupts the key / downstream logs
+        "q1\nSecond",   # newline -> log injection into any key-logging pipeline
+        "q1\r\nX",      # CRLF
+        "réport",       # non-ASCII look-alike
+        "a" * 200,      # over the length cap
+    ],
+)
 async def test_export_report_rejects_unsafe_report_id(report_id):
     """report_id becomes part of the S3 key, so path-y or blank ids are rejected.
 
@@ -132,3 +148,51 @@ async def test_export_report_rejects_unsafe_report_id(report_id):
             assert listed.get("KeyCount", 0) == 0
         finally:
             reports.set_s3_client(None)
+
+
+@pytest.mark.parametrize("report_id", ["2024.q1", "a..b", "v1.2.report", "R-99_final"])
+async def test_export_report_accepts_dotted_and_safe_ids(report_id):
+    """Ids with dots (even consecutive) are safe: no separator, no traversal.
+
+    The old denylist rejected any ``..`` substring, which false-rejected
+    legitimate ids like ``2024.q1``. The allowlist accepts them and still can't
+    escape the ``reports/`` prefix because separators are excluded.
+    """
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket=BUCKET)
+        reports.set_s3_client(s3)
+        try:
+            async with Client(reports.reports_server) as client:
+                result = await client.call_tool("export_report", {"report_id": report_id})
+            assert f"reports/{report_id}.pdf" in result.data["download_url"]
+            # The object lives under the reports/ prefix and nowhere else.
+            listed = s3.list_objects_v2(Bucket=BUCKET)
+            keys = [o["Key"] for o in listed.get("Contents", [])]
+            assert keys == [f"reports/{report_id}.pdf"]
+        finally:
+            reports.set_s3_client(None)
+
+
+async def test_export_report_masks_internal_storage_errors():
+    """A storage failure must not leak bucket/operation/AWS-code detail.
+
+    The caller (and thus the model's context) should see an opaque failure, not
+    a raw boto ``ClientError`` naming the bucket and the S3 operation.
+    """
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="us-east-1")
+        # Deliberately do NOT create the bucket, so the upload fails.
+        reports.set_s3_client(s3)
+        try:
+            async with Client(reports.reports_server) as client:
+                with pytest.raises(Exception) as excinfo:
+                    await client.call_tool("export_report", {"report_id": "q1"})
+        finally:
+            reports.set_s3_client(None)
+
+    message = str(excinfo.value)
+    assert "report export failed" in message
+    # None of the internal S3 detail should reach the caller.
+    for leak in ("NoSuchBucket", "PutObject", "acme-mcp-exports", "bucket"):
+        assert leak not in message

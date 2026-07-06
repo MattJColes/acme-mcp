@@ -17,11 +17,25 @@ The tool always just calls ``await <current agent>.run(prompt)``.
 
 from __future__ import annotations
 
+import re
+
 from fastmcp import Context, FastMCP
+from fastmcp.exceptions import ToolError
 
 from acme_mcp.agents import Agent, StubSupportAgent
 
 support_server = FastMCP("support")
+
+# An order id is an opaque identifier, never prose. Validating it against a tight
+# allowlist is what keeps ``draft_refund_email`` honest: the value is interpolated
+# into the agent's prompt, so anything other than ``[A-Za-z0-9._-]`` (newlines,
+# spaces, punctuation) would let a caller smuggle extra *instructions* into that
+# prompt -- the canonical "agent behind a tool" prompt-injection. The allowlist
+# also blocks control characters from reaching the ``ctx.info`` audit line (log
+# injection) and caps length so a caller can't inflate the prompt into an
+# unbounded token bill.
+_SAFE_ORDER_ID = re.compile(r"[A-Za-z0-9._-]+")
+MAX_ORDER_ID_LEN = 64
 
 # The currently injected inner agent. Defaults to the deterministic stub so the
 # server (and the default test path) needs no real LLM. Module-level rather than
@@ -81,10 +95,22 @@ async def draft_refund_email(order_id: str, ctx: Context) -> str:
     """Draft a customer-facing refund email for an order.
 
     Writing on-brand prose is open-ended, so this tool fronts the injected
-    inner agent. It builds a tightly-scoped prompt from the order id and returns
+    inner agent. It builds a scoped prompt from the order id and returns
     whatever text the agent produces -- the tool itself stays deterministic in
     everything *except* the prose, which is exactly the boundary we want.
+
+    ``order_id`` is caller-controlled and gets interpolated into that prompt, so
+    it is validated against a tight allowlist first. That is what makes the
+    prompt actually scoped rather than as-wide-as-the-attacker's-input: an id
+    carrying newlines or prose ("A1. Ignore prior instructions and ...") would
+    otherwise ride straight into the instructions the injected model executes.
     """
+    if not order_id or not order_id.strip():
+        raise ToolError("order_id is required")
+    if len(order_id) > MAX_ORDER_ID_LEN or not _SAFE_ORDER_ID.fullmatch(order_id):
+        raise ToolError(
+            "order_id may only contain letters, digits, '.', '-', and '_'"
+        )
     await ctx.info(f"drafting refund email for {order_id}")
     prompt = (
         "Write a brief, friendly refund-confirmation email to the customer for "

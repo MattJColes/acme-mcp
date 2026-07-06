@@ -74,3 +74,25 @@ async def test_guessed_hidden_tool_name_is_blocked(tagged_server):
             with pytest.raises(Exception) as excinfo:
                 await client.call_tool("issue_refund", {"order_id": "A1", "amount": 5.0})
     assert "issue_refund" in str(excinfo.value) or "Unknown tool" in str(excinfo.value)
+
+
+async def test_get_tool_error_does_not_leak_internal_detail(tagged_server):
+    """A raising ``get_tool`` (e.g. a proxied backend error) must not leak.
+
+    For an in-process tool ``get_tool`` returns ``None`` on an unknown name, but
+    a proxied tool can raise a backend/connection error whose text names internal
+    hosts and operations. The middleware must swallow that and return the uniform
+    "Unknown tool" answer, keeping the gate closed and the detail server-side.
+    """
+    async def boom(name):
+        raise RuntimeError("connection error to analytics.acme.internal: NoSuchKey secret-detail")
+
+    tagged_server.get_tool = boom
+    with as_caller(groups=["support"]):
+        async with Client(tagged_server) as client:
+            with pytest.raises(Exception) as excinfo:
+                await client.call_tool("order_status", {"order_id": "A1"})
+    message = str(excinfo.value)
+    assert "Unknown tool" in message
+    for leak in ("analytics.acme.internal", "NoSuchKey", "secret-detail", "connection error"):
+        assert leak not in message
