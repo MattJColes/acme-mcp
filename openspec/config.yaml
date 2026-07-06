@@ -1,0 +1,29 @@
+schema: spec-driven
+
+# Project context shown to AI when creating artifacts.
+context: |
+  acme-mcp: a worked example of a secure FastMCP 3 server (companion to the
+  post "Building and securing MCP servers with FastMCP").
+
+  Tech stack: Python >=3.10, FastMCP >=3.4,<4, boto3; tests with pytest +
+  pytest-asyncio (asyncio_mode=auto), FastMCP in-memory Client, moto for S3.
+  Layout: src/acme_mcp (src layout), tests/, skills/.
+
+  Conventions:
+  - TDD: every behavior lands with a test; no real AWS/IdP/network in tests.
+  - Security invariants are spec'd in openspec/specs/ and anchored to code
+    with ast-grep rules in openspec/specs/anchors/ (see AGENTS.md).
+  - Tools are tagged by domain; access is enforced by GroupTagFilter
+    middleware in BOTH on_list_tools and on_call_tool.
+
+# Per-artifact rules.
+rules:
+  specs:
+    - Each "### Requirement:" heading is followed by an invisible HTML
+      comment "<!-- anchor: <id> -->"; the id maps to ast-grep rules in
+      openspec/specs/anchors/<capability>.yml.
+    - Keep each requirement section under a 40-line soft cap; if a change
+      would blow the cap, propose a split instead of appending.
+    - Change proposals write delta specs under changes/; main specs in
+      openspec/specs/ are only updated at sync/archive time, reviewed as a
+      diff by a human (see AGENTS.md).

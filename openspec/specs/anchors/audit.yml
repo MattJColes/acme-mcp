@@ -1,0 +1,11 @@
+# ast-grep anchors for openspec/specs/audit/spec.md
+
+audit.on-call:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^on_call_tool$' }
+    inside:
+      kind: class_definition
+      has: { field: name, regex: '^AuditLog$' }
+      stopBy: end
+  files: [src/**/*.py]

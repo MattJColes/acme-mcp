@@ -1,0 +1,28 @@
+# ast-grep anchors for openspec/specs/auth/spec.md
+# Each id maps a "### Requirement:" section to the code it describes.
+# Rules match node kind + name (not `pattern:`) so they survive moves and
+# break only on renames — which is the signal we want.
+
+auth.verifier-split:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^build_auth$' }
+  files: [src/**/*.py]
+
+auth.group-tags:
+  rule:
+    kind: assignment
+    has: { field: left, regex: '^GROUP_TAGS$' }
+  files: [src/**/*.py]
+
+auth.default-deny:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^allowed_tags$' }
+  files: [src/**/*.py]
+
+auth.fail-closed-groups:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_normalize_groups$' }
+  files: [src/**/*.py]

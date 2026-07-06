@@ -1,0 +1,19 @@
+# ast-grep anchors for openspec/specs/tool-domains/spec.md
+
+domains.order-status:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^order_status$' }
+  files: [src/**/*.py]
+
+domains.get-invoice:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^get_invoice$' }
+  files: [src/**/*.py]
+
+domains.issue-refund:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^issue_refund$' }
+  files: [src/**/*.py]
