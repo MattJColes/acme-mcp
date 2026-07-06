@@ -55,7 +55,13 @@ def issue_refund(order_id: str, amount: float) -> dict:
     """
     if not order_id or not order_id.strip():
         raise ToolError("order_id is required")
-    # ``bool`` is a subclass of ``int``; reject it so True/False can't pass as 1/0.
+    # Defense in depth for direct/backend callers: ``bool`` is a subclass of
+    # ``int``, so reject it explicitly. Over the MCP wire this rarely fires --
+    # the ``amount: float`` schema coerces a JSON ``true``/``false`` to ``1.0`` /
+    # ``0.0`` before the tool body runs, so a boolean never reaches here as a
+    # ``bool``. That coercion is why the real guarantees for the money tool are
+    # the positive-and-finite checks below (``0.0`` from ``false`` is rejected by
+    # ``amount <= 0``), not this ``isinstance`` check.
     if isinstance(amount, bool) or not isinstance(amount, (int, float)):
         raise ToolError("amount must be a number")
     if not math.isfinite(amount) or amount <= 0:
