@@ -22,7 +22,6 @@ from __future__ import annotations
 import typing
 
 
-@typing.runtime_checkable
 class Agent(typing.Protocol):
     """The narrow interface an inner agent must satisfy.
 

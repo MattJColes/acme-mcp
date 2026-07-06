@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 
-from fastmcp import Context, FastMCP
+from fastmcp import FastMCP
 
 from acme_mcp.access import GroupTagFilter
 from acme_mcp.audit import AuditLog
@@ -45,7 +45,7 @@ def build_server(env: str | None = None) -> FastMCP:
     mcp = FastMCP("acme", auth=build_auth(env))
 
     @mcp.tool(tags={"public"})
-    def whoami(ctx: Context) -> dict:
+    def whoami() -> dict:
         """Return the caller's verified identity and groups."""
         token = get_access_token()
         claims = token.claims if token else {}
