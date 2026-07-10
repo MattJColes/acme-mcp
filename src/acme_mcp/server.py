@@ -7,7 +7,7 @@ This is where the pieces fit together, in the order the blog post builds them:
    split by domain rather than one giant file.
 3. Wrap every tool call in audit logging (:class:`acme_mcp.audit.AuditLog`).
 4. Filter the tools each caller sees and can run by their group
-   (:class:`acme_mcp.access.GroupTagFilter`).
+   (:func:`acme_mcp.access.build_access_middleware`).
 
 A local stdio server is a convenience; a remote HTTP server is production
 infrastructure and gets treated like it. ``main`` runs stdio by default and
@@ -20,7 +20,7 @@ import os
 
 from fastmcp import FastMCP
 
-from acme_mcp.access import GroupTagFilter
+from acme_mcp.access import build_access_middleware
 from acme_mcp.audit import AuditLog
 from acme_mcp.auth import build_auth
 from acme_mcp.domains.admin import admin_server
@@ -59,10 +59,10 @@ def build_server(env: str | None = None) -> FastMCP:
     for sub in (orders_server, billing_server, admin_server, support_server, reports_server):
         mcp.mount(sub)
 
-    # Audit first so it wraps the outermost call; the group filter sits inside
-    # it and decides who may reach each tool.
+    # Audit first so it wraps the outermost call; the access middleware sits
+    # inside it and decides who may reach each tool.
     mcp.add_middleware(AuditLog())
-    mcp.add_middleware(GroupTagFilter())
+    mcp.add_middleware(build_access_middleware())
     return mcp
 
 

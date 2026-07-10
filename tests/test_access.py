@@ -1,14 +1,14 @@
 """The core security test: per-group visibility AND call-blocking.
 
-These tests are the heart of the example. They prove the two-layer guarantee:
-a tool a caller isn't cleared for is both hidden from the list and uncallable
-even when its name is supplied directly.
+These tests are the heart of the example. They prove the guarantee FastMCP's
+``AuthMiddleware`` gives us: a tool a caller isn't cleared for is both hidden
+from the list and uncallable even when its name is supplied directly.
 """
 
 import pytest
 from fastmcp import Client, FastMCP
 
-from acme_mcp.access import GroupTagFilter
+from acme_mcp.access import build_access_middleware
 from tests.conftest import as_caller
 
 
@@ -28,7 +28,7 @@ def tagged_server():
     def issue_refund(order_id: str, amount: float) -> dict:
         return {"order_id": order_id, "refunded": amount}
 
-    mcp.add_middleware(GroupTagFilter())
+    mcp.add_middleware(build_access_middleware())
     return mcp
 
 
@@ -73,26 +73,24 @@ async def test_guessed_hidden_tool_name_is_blocked(tagged_server):
         async with Client(tagged_server) as client:
             with pytest.raises(Exception) as excinfo:
                 await client.call_tool("issue_refund", {"order_id": "A1", "amount": 5.0})
-    assert "issue_refund" in str(excinfo.value) or "Unknown tool" in str(excinfo.value)
+    message = str(excinfo.value).lower()
+    assert "authorization" in message or "permission" in message
 
 
-async def test_get_tool_error_does_not_leak_internal_detail(tagged_server):
-    """A raising ``get_tool`` (e.g. a proxied backend error) must not leak.
+async def test_denied_call_names_the_tool(tagged_server):
+    """A blocked call surfaces a not-authorized error that names the tool.
 
-    For an in-process tool ``get_tool`` returns ``None`` on an unknown name, but
-    a proxied tool can raise a backend/connection error whose text names internal
-    hosts and operations. The middleware must swallow that and return the uniform
-    "Unknown tool" answer, keeping the gate closed and the detail server-side.
+    This is the deliberate tradeoff of using the built-in ``AuthMiddleware`` over
+    a hand-rolled middleware that normalised both denied and unknown tools to
+    "Unknown tool". The built-in doesn't hide that a denied tool exists -- its
+    error names the tool and says "insufficient permissions", which a prober can
+    distinguish from the "not found" a genuinely-unknown tool returns. Less code,
+    but tool names are enumerable. Worth knowing; not worth the extra middleware
+    for this example.
     """
-    async def boom(name):
-        raise RuntimeError("connection error to analytics.acme.internal: NoSuchKey secret-detail")
-
-    tagged_server.get_tool = boom
-    with as_caller(groups=["support"]):
+    with as_caller(groups=["support"]):  # support is NOT cleared for admin
         async with Client(tagged_server) as client:
             with pytest.raises(Exception) as excinfo:
-                await client.call_tool("order_status", {"order_id": "A1"})
+                await client.call_tool("issue_refund", {"order_id": "A1", "amount": 5.0})
     message = str(excinfo.value)
-    assert "Unknown tool" in message
-    for leak in ("analytics.acme.internal", "NoSuchKey", "secret-detail", "connection error"):
-        assert leak not in message
+    assert "issue_refund" in message

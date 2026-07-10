@@ -2,8 +2,10 @@
 
 Tests drive the server with the in-memory ``Client`` (no network), and simulate
 an authenticated caller by setting the auth context var directly to an
-``AccessToken`` carrying the claims a real IdP would have signed. This is the
-documented way to unit-test FastMCP auth without minting real JWTs.
+``AccessToken`` carrying the claims a real IdP would have signed. FastMCP's own
+docs show minting real test JWTs with ``RSAKeyPair.generate()`` or seeding a
+``StaticTokenVerifier``; setting the context var is a shorter route for unit
+tests, bypassing verification the way a stub would.
 """
 
 from __future__ import annotations

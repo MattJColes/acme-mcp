@@ -8,8 +8,8 @@ static tokens instead.
 
 Once a caller is authenticated, their token claims carry a ``groups`` list.
 ``GROUP_TAGS`` maps each org group to the set of tool *tags* it is allowed to
-see, and :func:`allowed_tags` resolves the current caller's groups into the set
-of tags they may use. The access-control middleware in :mod:`acme_mcp.access`
+see, and :func:`tags_for_groups` resolves a token's groups claim into the set
+of tags it permits. The access-control check in :mod:`acme_mcp.access`
 consumes that set.
 """
 
@@ -18,7 +18,6 @@ from __future__ import annotations
 import os
 
 from fastmcp.server.auth.providers.jwt import JWTVerifier, StaticTokenVerifier
-from fastmcp.server.dependencies import get_access_token
 
 # Sentinel tag meaning "every tag, including ones from domains added later".
 # A group cleared for it sees and can call every tool regardless of the tool's
@@ -44,21 +43,19 @@ GROUP_TAGS: dict[str, set[str]] = {
 PUBLIC_TAGS: set[str] = {"public"}
 
 
-def allowed_tags() -> set[str]:
-    """Return the set of tool tags the current caller's groups permit.
+def tags_for_groups(groups) -> set[str]:
+    """Resolve a ``groups`` claim into the set of tool tags it permits.
 
-    Reads ``groups`` from the verified access token. An unauthenticated caller
-    gets nothing (the default is "see nothing"). An authenticated caller always
-    gets ``PUBLIC_TAGS`` plus the union of the tags their groups map to, so an
-    unknown group still sees identity/health tools but no business domains. A
-    group cleared for ``ALL_TAGS`` (e.g. ``admin``) yields a set containing the
-    wildcard; :func:`acme_mcp.access.cleared_for` treats that as "every tag".
+    Takes the ``groups`` value straight from the token rather than reading
+    global request state, so the access-control check in :mod:`acme_mcp.access`
+    can pass the claim through. An empty or malformed claim yields only
+    ``PUBLIC_TAGS`` (identity and health tools), so an unknown group still sees
+    those but no business domains. A group cleared for ``ALL_TAGS`` (e.g.
+    ``admin``) yields a set containing the wildcard, which
+    :func:`acme_mcp.access.group_access` treats as "every tag".
     """
-    token = get_access_token()
-    if token is None:
-        return set()
-    groups = _normalize_groups(token.claims.get("groups"))
-    tags = set().union(*(GROUP_TAGS.get(g, set()) for g in groups), set())
+    names = _normalize_groups(groups)
+    tags = set().union(*(GROUP_TAGS.get(g, set()) for g in names))
     return tags | PUBLIC_TAGS
 
 
