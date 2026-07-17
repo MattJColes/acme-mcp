@@ -9,12 +9,12 @@ domain -- see ``GROUP_TAGS`` in :mod:`acme_mcp.auth` for the exact grants.)
 FastMCP 3 ships callable-based authorization for exactly this. An auth check is
 a function that takes an :class:`AuthContext` (the caller's token plus the
 component being accessed) and returns ``True`` to allow or ``False`` to deny.
-Wiring that check through :class:`AuthMiddleware` enforces it across every
-component in two places at once:
+Wiring that check through :class:`AuthMiddleware` enforces it across tools,
+resources, and prompts when they are listed or used.
 
-* it filters denied tools out of ``tools/list``, so they never clutter the
-  model's context; and
-* it blocks a direct call to a denied tool even if the model guesses the name.
+* it filters denied components out of the list responses, so they never clutter
+  the model's context; and
+* it blocks direct use even if the model guesses a hidden name or URI.
 
 One tradeoff to know about: the built-in does not pretend a denied tool doesn't
 exist. A blocked call surfaces an "insufficient permissions" error that names
@@ -37,7 +37,7 @@ def group_access(ctx: AuthContext) -> bool:
 
     ``True`` when the caller holds the wildcard (``ALL_TAGS``, e.g. admin) or
     when any of the component's tags is in the set the caller's groups map to.
-    ``public``-tagged tools pass for any authenticated caller; an unauthenticated
+    ``public``-tagged components pass for any authenticated caller; an unauthenticated
     caller (``ctx.token is None``) is denied everything, which is what hides
     every business tool from ``tools/list`` before any auth provider rejects the
     request outright.
@@ -47,9 +47,15 @@ def group_access(ctx: AuthContext) -> bool:
     allowed = tags_for_groups(ctx.token.claims.get("groups"))
     if ALL_TAGS in allowed:
         return True
-    return bool(set(ctx.component.tags) & allowed)
+
+    component_tags = set(ctx.component.tags)
+    if skill_info := getattr(ctx.component, "skill_info", None):
+        # ponytail: FastMCP 3.4 keeps skill frontmatter as metadata rather than
+        # component tags. Remove this fallback when SkillProvider projects tags.
+        component_tags.update(skill_info.frontmatter.get("tags", []))
+    return bool(component_tags & allowed)
 
 
 def build_access_middleware() -> AuthMiddleware:
-    """Server-wide authorization: hide denied tools and block calls to them."""
+    """Server-wide authorization for tools, resources, and prompts."""
     return AuthMiddleware(auth=group_access)

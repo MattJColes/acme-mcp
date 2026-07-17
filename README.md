@@ -13,13 +13,13 @@ can see how the pieces fit instead of stitching them together yourself.
 | Concern | Where | What it shows |
 | --- | --- | --- |
 | Auth | `src/acme_mcp/auth.py` | `JWTVerifier` in prod, `StaticTokenVerifier` for local dev; the group → tag map |
-| Per-group access | `src/acme_mcp/access.py` | `GroupTagFilter` middleware: hides tools **and** blocks calls to hidden ones |
+| Per-group access | `src/acme_mcp/access.py` | FastMCP `AuthMiddleware`: hides components **and** blocks direct use |
 | Audit trail | `src/acme_mcp/audit.py` | `AuditLog` middleware logging user / groups / tool / timing on every call |
 | Deterministic domains | `src/acme_mcp/domains/{orders,billing,admin}.py` | plain typed tools over a data backend |
 | Agent behind a tool | `src/acme_mcp/domains/support.py` + `agents.py` | an injectable, mockable inner agent on a tight leash |
 | File delivery | `src/acme_mcp/domains/reports.py` + `storage.py` | upload to S3, return a short-lived signed URL — never the bytes |
 | Composition | `src/acme_mcp/server.py` | mount in-process domains; proxy a separately-owned one |
-| Companion skill | `skills/handle-downloads/SKILL.md` | how an agent should treat a returned `download_url` |
+| Companion skill | `src/acme_mcp/skills/handle-downloads/SKILL.md` | a reports-scoped skill published by the MCP server |
 
 ## Install
 
@@ -61,23 +61,24 @@ caller sees orders/billing/support/reports tools; `finance` sees billing/reports
 Every request is authenticated, then two middleware run:
 
 1. `AuditLog` records who called what.
-2. `GroupTagFilter` enforces access in **two** places — it hides tools the caller
-   isn't cleared for (`on_list_tools`) *and* blocks calls to them
-   (`on_call_tool`), so a guessed tool name still fails. Filtering only the list
-   would leave a named tool callable; filtering the call is what shuts the door.
+2. FastMCP's `AuthMiddleware` hides components the caller isn't cleared for and
+   blocks direct use, so guessing a hidden tool or resource still fails.
 
 Tools are tagged by domain (`orders`, `billing`, `admin`, `support`, `reports`);
 `GROUP_TAGS` in `auth.py` maps each org group to the tags it may use. The
 identity tool `whoami` is tagged `public` so any authenticated caller can see it.
+The `handle-downloads` skill is tagged `reports`, so the same groups that can
+export a report can discover and read its handling instructions through
+`skill://handle-downloads/SKILL.md`.
 The `admin` group is cleared for the wildcard tag (`ALL_TAGS`) rather than an
 explicit domain list, so it stays a true superset — including a later-composed
 domain such as the proxied `analytics` service — without anyone having to edit
 its tag list each time a domain is added.
 
-> **Note on the post's `Transform`:** the draft post sketches this filter as a
-> `Transform`/`add_transform`. This repo implements it as FastMCP **middleware**
-> (`on_list_tools` + `on_call_tool`), which is the supported per-request
-> mechanism in FastMCP 3 and delivers the same two-layer guarantee.
+The companion skill lives in the server package and is exposed with FastMCP's
+`SkillProvider`. The client reads it as an MCP resource when it needs the
+instructions; the server remains responsible for authenticating and authorizing
+that read.
 
 ## Test
 
