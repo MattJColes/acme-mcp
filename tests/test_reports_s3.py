@@ -194,3 +194,26 @@ async def test_export_report_masks_internal_storage_errors():
     # None of the internal S3 detail should reach the caller.
     for leak in ("NoSuchBucket", "PutObject", "acme-mcp-exports", "bucket"):
         assert leak not in message
+
+
+# --- server.wire_dev_s3 (dev-mode wiring) -----------------------------------
+
+async def test_wire_dev_s3_makes_export_report_work_without_aws():
+    """In dev the moto-backed wiring makes ``export_report`` run end-to-end.
+
+    ``wire_dev_s3`` starts a process-lifetime moto mock, creates the export
+    bucket, and injects the client via the existing ``set_s3_client`` seam --
+    so a plain ``python -m acme_mcp.server`` dev run can actually export.
+    """
+    from acme_mcp import server as srv
+
+    mock = srv.wire_dev_s3()
+    assert mock is not None  # moto is a dev dependency, so it's installed here
+    try:
+        async with Client(reports.reports_server) as client:
+            result = await client.call_tool("export_report", {"report_id": "dev1"})
+        assert "reports/dev1.pdf" in result.data["download_url"]
+        assert result.data["expires_in"] == 300
+    finally:
+        reports.set_s3_client(None)
+        mock.stop()

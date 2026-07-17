@@ -51,6 +51,10 @@ ACME_MCP_REMOTE=1 ACME_MCP_ENV=prod python -m acme_mcp.server
 | `ACME_MCP_JWKS_URI` / `ACME_MCP_ISSUER` / `ACME_MCP_AUDIENCE` | acme defaults | JWT verifier settings (prod) |
 | `ACME_MCP_ANALYTICS_URL` | unset | when set, proxy a remote analytics MCP service and mount it |
 
+In `dev`, `export_report` is backed by an in-process fake S3 (moto, from the
+`dev` extra) so the whole example runs without AWS credentials; in `prod` it
+uses the real boto3 client and expects the export bucket to exist.
+
 In `dev`, the `StaticTokenVerifier` accepts these bearer tokens, each mapped to a
 group: `dev-support`, `dev-finance`, `dev-admin` (see `auth.py`). A `support`
 caller sees orders/billing/support/reports tools; `finance` sees billing/reports;

@@ -1,4 +1,9 @@
 # ast-grep anchors for openspec/specs/access-control/spec.md
+#
+# Since the AuthMiddleware refactor, list-filtering and call-blocking are both
+# provided by FastMCP's built-in AuthMiddleware; the repo's code is the wiring
+# (`build_access_middleware`) and the clearance check (`group_access`). The
+# two enforcement-point anchors therefore resolve to the single wiring site.
 
 access.list-filter:
   rule:

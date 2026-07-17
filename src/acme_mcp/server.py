@@ -84,9 +84,43 @@ def mount_analytics(mcp: FastMCP, url: str | None = None) -> None:
     mcp.mount(analytics)
 
 
+def wire_dev_s3():
+    """Back ``export_report`` with an in-process moto S3 for dev runs.
+
+    In dev there is no real AWS, so without this the reports domain is the one
+    part of the example that can't run end-to-end. moto ships in the ``dev``
+    extra; when it's importable we start a process-lifetime mock, create the
+    export bucket, and hand the client to the reports seam. Returns the started
+    mock (so a test can stop it) or ``None`` when moto isn't installed.
+    """
+    try:
+        from moto import mock_aws
+    except ImportError:
+        import logging
+
+        logging.getLogger("acme_mcp.server").warning(
+            "moto not installed; export_report needs real AWS credentials "
+            "and the export bucket (pip install -e '.[dev]' for a local fake)"
+        )
+        return None
+    import boto3
+
+    from acme_mcp.domains import reports
+
+    mock = mock_aws()
+    mock.start()
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket=reports.EXPORT_BUCKET)
+    reports.set_s3_client(s3)
+    return mock
+
+
 def main() -> None:
     """Console entry point. stdio locally; HTTP when ACME_MCP_REMOTE is set."""
     mcp = build_server()
+
+    if os.environ.get("ACME_MCP_ENV", "dev") == "dev":
+        wire_dev_s3()
 
     if os.environ.get("ACME_MCP_ANALYTICS_URL"):
         mount_analytics(mcp)
