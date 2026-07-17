@@ -1,6 +1,7 @@
 ---
 name: handle-downloads
 description: How to handle a download_url returned by an acme-mcp tool. Use whenever a tool result contains a "download_url" field (for example from export_report) — present it to the user as a link, mention the expiry, and never read the file into context.
+tags: ["reports"]
 ---
 
 # Handling file downloads from acme-mcp
