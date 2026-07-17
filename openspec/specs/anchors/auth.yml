@@ -18,7 +18,7 @@ auth.group-tags:
 auth.default-deny:
   rule:
     kind: function_definition
-    has: { field: name, regex: '^allowed_tags$' }
+    has: { field: name, regex: '^tags_for_groups$' }
   files: [src/**/*.py]
 
 auth.fail-closed-groups:

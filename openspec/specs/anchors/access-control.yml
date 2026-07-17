@@ -1,27 +1,24 @@
 # ast-grep anchors for openspec/specs/access-control/spec.md
+#
+# Since the AuthMiddleware refactor, list-filtering and call-blocking are both
+# provided by FastMCP's built-in AuthMiddleware; the repo's code is the wiring
+# (`build_access_middleware`) and the clearance check (`group_access`). The
+# two enforcement-point anchors therefore resolve to the single wiring site.
 
 access.list-filter:
   rule:
     kind: function_definition
-    has: { field: name, regex: '^on_list_tools$' }
-    inside:
-      kind: class_definition
-      has: { field: name, regex: '^GroupTagFilter$' }
-      stopBy: end
+    has: { field: name, regex: '^build_access_middleware$' }
   files: [src/**/*.py]
 
 access.call-block:
   rule:
     kind: function_definition
-    has: { field: name, regex: '^on_call_tool$' }
-    inside:
-      kind: class_definition
-      has: { field: name, regex: '^GroupTagFilter$' }
-      stopBy: end
+    has: { field: name, regex: '^build_access_middleware$' }
   files: [src/**/*.py]
 
 access.cleared-for:
   rule:
     kind: function_definition
-    has: { field: name, regex: '^cleared_for$' }
+    has: { field: name, regex: '^group_access$' }
   files: [src/**/*.py]
