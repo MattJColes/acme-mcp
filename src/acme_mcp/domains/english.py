@@ -58,7 +58,7 @@ _VERB_SUFFIXES = ("ize", "ise", "ify", "ate", "ed", "ing")
 
 
 def _tokens(text: str) -> list[str]:
-    return re.findall(r"[A-Za-z0-9']+", text.lower())
+    return re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)*", text.lower())
 
 
 # ponytail: lexicon+suffix POS is demo-grade; replace _pos_scan with spaCy

@@ -72,3 +72,15 @@ async def test_word_count(server):
 
     assert result == {"words": 5, "unique_words": 4}
     assert empty == {"words": 0, "unique_words": 0}
+
+
+async def test_word_count_ignores_standalone_apostrophes(server):
+    with as_caller(groups=["admin"]):
+        async with Client(server) as client:
+            result = (
+                await client.call_tool(
+                    "word_count", {"text": "' ''' don't"}
+                )
+            ).data
+
+    assert result == {"words": 1, "unique_words": 1}
