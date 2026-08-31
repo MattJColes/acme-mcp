@@ -19,9 +19,9 @@ context: |
 # Per-artifact rules.
 rules:
   specs:
-    - Each "### Requirement:" heading is followed by an invisible HTML
+    - 'Each "### Requirement:" heading is followed by an invisible HTML
       comment "<!-- anchor: <id> -->"; the id maps to ast-grep rules in
-      openspec/specs/anchors/<capability>.yml.
+      openspec/specs/anchors/<capability>.yml.'
     - Keep each requirement section under a 40-line soft cap; if a change
       would blow the cap, propose a split instead of appending.
     - Change proposals write delta specs under changes/; main specs in

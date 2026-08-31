@@ -32,8 +32,15 @@ ALL_TAGS = "*"
 # ``admin`` is cleared for the wildcard so it stays a true superset as new
 # domains are mounted, rather than needing this list edited for each one.
 GROUP_TAGS: dict[str, set[str]] = {
-    "support": {"orders", "billing", "support", "reports"},
-    "finance": {"billing", "reports"},
+    "support": {
+        "orders",
+        "billing",
+        "support",
+        "reports",
+        "maths",
+        "english",
+    },
+    "finance": {"billing", "reports", "maths", "english"},
     "admin": {ALL_TAGS},
 }
 
