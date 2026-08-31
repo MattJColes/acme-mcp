@@ -68,6 +68,43 @@ Every request is authenticated, then two middleware run:
 2. FastMCP's `AuthMiddleware` hides components the caller isn't cleared for and
    blocks direct use, so guessing a hidden tool or resource still fails.
 
+The structure behind that: one server, five mounted domain sub-servers, and the
+middleware pipeline every request passes through:
+
+```mermaid
+C4Container
+    title acme MCP server — how tool groups compose and gate access
+
+    Person(end_user, "End user", "MCP client (e.g. Claude Desktop). IdP group: support, finance or admin")
+
+    System_Boundary(acme, "acme — FastMCP 3 server (stdio locally, HTTP :8000 remotely)") {
+        Container(mw, "Middleware pipeline", "FastMCP 3", "AuditLog outermost, then AuthMiddleware: groups to allowed tags via GROUP_TAGS, enforced on BOTH tools/list and tools/call")
+        Container(orders, "orders server", "FastMCP sub-server", "order_status (tag: orders)")
+        Container(billing, "billing server", "FastMCP sub-server", "get_invoice (tag: billing)")
+        Container(support, "support server", "FastMCP sub-server", "support_macro, draft_refund_email (tag: support)")
+        Container(admin, "admin server", "FastMCP sub-server", "issue_refund (tag: admin)")
+        Container(reports, "reports server", "FastMCP sub-server", "export_report (tag: reports) + skill://handle-downloads resource")
+        Container(root, "root tools", "FastMCP", "whoami (tag: public — every authenticated caller)")
+    }
+
+    System_Ext(idp, "Acme IdP", "Signs JWTs; groups claim drives clearance (JWKS)")
+    System_Ext(agent, "Support agent", "LLM behind draft_refund_email (stubbed in dev)")
+    System_Ext(s3, "S3 bucket acme-mcp-exports", "Exported reports; presigned GET, 5 min expiry")
+    System_Ext(analytics, "Analytics MCP (optional)", "Remote proxy, tag: analytics — same clearance, mounted only when ACME_MCP_ANALYTICS_URL is set")
+
+    UpdateRelStyle(support, agent, offsetX = 60)
+
+    Rel(end_user, mw, " ", "")
+    Rel(mw, orders, " ", "")
+    Rel(mw, billing, " ", "")
+    Rel(mw, support, " ", "")
+    Rel(mw, admin, " ", "")
+    Rel(mw, reports, " ", "")
+    Rel(mw, idp, "Verify JWT via JWKS", "HTTPS")
+    Rel(support, agent, "Prompt w/ validated order_id", "")
+    Rel(reports, s3, " ", "")
+```
+
 Tools are tagged by domain (`orders`, `billing`, `admin`, `support`, `reports`);
 `GROUP_TAGS` in `auth.py` maps each org group to the tags it may use. The
 identity tool `whoami` is tagged `public` so any authenticated caller can see it.
@@ -78,6 +115,42 @@ The `admin` group is cleared for the wildcard tag (`ALL_TAGS`) rather than an
 explicit domain list, so it stays a true superset — including a later-composed
 domain such as the proxied `analytics` service — without anyone having to edit
 its tag list each time a domain is added.
+
+And what a caller actually experiences, per request — listing, an allowed call,
+and a denied one:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor u as End user (MCP client)
+    participant s as acme server
+    participant a as AuthMiddleware
+    participant d as Domain tool
+    participant l as AuditLog
+
+    note over u,l: GROUP_TAGS - support: orders, billing, support, reports | finance: billing, reports | admin: * (wildcard, incl. future domains) | unknown group: public only
+
+    u->>s: connect with token (dev bearer or IdP JWT)
+    s->>a: verify token, read groups claim
+    a-->>s: allowed tags = union of GROUP_TAGS + public
+
+    u->>s: tools/list
+    s->>a: keep tools whose tags intersect allowed tags
+    a-->>u: filtered list (support sees 6 tools, unknown group sees only whoami)
+
+    alt tag cleared - support calls order_status
+        u->>s: tools/call order_status(order_id)
+        s->>a: orders in allowed tags, allow
+        s->>d: execute lookup
+        d-->>u: status result
+    else tag not cleared - support calls issue_refund
+        u->>s: tools/call issue_refund(order_id, amount)
+        s->>a: admin not in allowed tags, deny
+        s-->>u: error naming the tool
+    end
+
+    note over l: every call, allowed or denied, is logged as {user, groups, tool, ms, error}
+```
 
 The companion skill lives in the server package and is exposed with FastMCP's
 `SkillProvider`. The client reads it as an MCP resource when it needs the
