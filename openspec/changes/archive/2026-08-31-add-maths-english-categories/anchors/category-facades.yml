@@ -1,0 +1,10 @@
+# ast-grep anchors for openspec/specs/category-facades/spec.md
+
+# The facade section describes what perform_maths/perform_english return,
+# which is produced by the factory both tools are built from (the nested
+# closure is named `facade`, so this pins the factory only).
+facades.perform:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_facade$' }
+  files: [src/**/*.py]
