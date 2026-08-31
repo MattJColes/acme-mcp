@@ -5,7 +5,7 @@ This is where the pieces fit together, in the order the blog post builds them:
 1. Authenticate every caller (:func:`acme_mcp.auth.build_auth`).
 2. Mount each business domain as its own sub-server, so the codebase stays
    split by domain rather than one giant file.
-3. Publish the companion skill as MCP resources.
+3. Publish companion skills as MCP resources.
 4. Wrap every tool call in audit logging (:class:`acme_mcp.audit.AuditLog`).
 5. Filter the components each caller sees and can use by their group
    (:func:`acme_mcp.access.build_access_middleware`).
@@ -27,11 +27,13 @@ from acme_mcp.audit import AuditLog
 from acme_mcp.auth import build_auth
 from acme_mcp.domains.admin import admin_server
 from acme_mcp.domains.billing import billing_server
+from acme_mcp.domains.english import english_server
+from acme_mcp.domains.maths import maths_server
 from acme_mcp.domains.orders import orders_server
 from acme_mcp.domains.reports import reports_server
 from acme_mcp.domains.support import support_server
 from fastmcp.server.dependencies import get_access_token
-from fastmcp.server.providers.skills import SkillProvider
+from fastmcp.server.providers.skills import SkillsDirectoryProvider
 
 # The separately-owned analytics domain runs as its own service. We proxy it
 # rather than holding it in-process; this is the closest thing to lazy loading,
@@ -41,7 +43,46 @@ from fastmcp.server.providers.skills import SkillProvider
 ANALYTICS_URL = os.environ.get(
     "ACME_MCP_ANALYTICS_URL", "https://analytics.acme.internal/mcp"
 )
-HANDLE_DOWNLOADS_SKILL = Path(__file__).parent / "skills" / "handle-downloads"
+SKILLS_DIR = Path(__file__).parent / "skills"
+
+
+def _facade(mcp: FastMCP, *, name: str, tag: str, description: str) -> None:
+    """Register a no-argument tool describing one tagged domain."""
+
+    async def facade() -> dict:
+        tools = [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.parameters,
+            }
+            for tool in await mcp.list_tools()
+            if tag in tool.tags and tool.name != name
+        ]
+        skills = []
+        for resource in await mcp.list_resources():
+            info = getattr(resource, "skill_info", None)
+            uri = str(resource.uri)
+            if (
+                info is not None
+                and tag in info.frontmatter.get("tags", [])
+                and uri.endswith("/SKILL.md")
+            ):
+                skills.append(
+                    {
+                        "name": info.name,
+                        "description": info.description,
+                        "uri": uri,
+                    }
+                )
+        return {
+            "category": tag,
+            "description": description,
+            "tools": tools,
+            "skills": skills,
+        }
+
+    mcp.tool(facade, name=name, description=description, tags={tag})
 
 
 def build_server(env: str | None = None) -> FastMCP:
@@ -60,10 +101,30 @@ def build_server(env: str | None = None) -> FastMCP:
 
     # Mount each domain in-process. No namespace: these are domains of one
     # product, so tool names stay clean (order_status, not orders_order_status).
-    for sub in (orders_server, billing_server, admin_server, support_server, reports_server):
+    for sub in (
+        orders_server,
+        billing_server,
+        admin_server,
+        support_server,
+        reports_server,
+        maths_server,
+        english_server,
+    ):
         mcp.mount(sub)
 
-    mcp.add_provider(SkillProvider(HANDLE_DOWNLOADS_SKILL))
+    mcp.add_provider(SkillsDirectoryProvider(roots=SKILLS_DIR))
+    _facade(
+        mcp,
+        name="perform_maths",
+        tag="maths",
+        description="List the available maths operations and companion skills.",
+    )
+    _facade(
+        mcp,
+        name="perform_english",
+        tag="english",
+        description="List the available English analysis tools and companion skills.",
+    )
 
     # Audit first so it wraps the outermost call; the access middleware sits
     # inside it and decides who may reach each tool.

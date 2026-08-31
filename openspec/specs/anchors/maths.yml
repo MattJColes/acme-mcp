@@ -1,0 +1,25 @@
+# ast-grep anchors for openspec/specs/maths/spec.md
+
+maths.addition:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^addition$' }
+  files: [src/**/*.py]
+
+maths.subtraction:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^subtraction$' }
+  files: [src/**/*.py]
+
+maths.multiplication:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^multiplication$' }
+  files: [src/**/*.py]
+
+maths.division:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^division$' }
+  files: [src/**/*.py]

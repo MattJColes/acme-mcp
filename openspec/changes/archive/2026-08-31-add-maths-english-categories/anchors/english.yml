@@ -1,0 +1,25 @@
+# ast-grep anchors for openspec/specs/english/spec.md
+
+english.vowel-count:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^vowel_count$' }
+  files: [src/**/*.py]
+
+english.noun-count:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^noun_count$' }
+  files: [src/**/*.py]
+
+english.verb-count:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^verb_count$' }
+  files: [src/**/*.py]
+
+english.word-count:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^word_count$' }
+  files: [src/**/*.py]
