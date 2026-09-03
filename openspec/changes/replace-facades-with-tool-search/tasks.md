@@ -6,7 +6,7 @@
 
 ## 2. Engineering Guide
 
-- [x] 2.1 Rewrite `docs/tool-grouping.md` with a summary, direct native-tool example, and a diagram showing `identity groups -> domain tags -> permitted tools -> host tool search -> typed call`; verify the prose does not claim providers search FastMCP tags.
+- [x] 2.1 Rewrite `docs/tool-discovery.md` with a summary, direct native-tool example, and a diagram showing `identity groups -> domain tags -> permitted tools -> host tool search -> typed call`; verify the prose does not claim providers search FastMCP tags.
 - [x] 2.2 Add concise Claude and OpenAI deferred-loading examples linked to their official documentation, plus the facade fallback trade-off for hosts without tool search; verify each example matches the current provider syntax.
 - [x] 2.3 Explain how the same tags group companion skills for access while skill resource discovery remains separate from tool search; verify the example tags match the registered tools and skill frontmatter.
 

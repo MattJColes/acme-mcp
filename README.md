@@ -20,7 +20,7 @@ can see how the pieces fit instead of stitching them together yourself.
 | File delivery | `src/acme_mcp/domains/reports.py` + `storage.py` | upload to S3, return a short-lived signed URL — never the bytes |
 | Composition | `src/acme_mcp/server.py` | mount in-process domains; proxy a separately-owned one |
 | Companion skill | `src/acme_mcp/skills/handle-downloads/SKILL.md` | a reports-scoped skill published by the MCP server |
-| Domain filtering and tool search | `src/acme_mcp/auth.py` + `docs/tool-grouping.md` | tags remove unauthorized domains; capable hosts defer and search the permitted native tools |
+| Domain filtering and tool search | `src/acme_mcp/auth.py` + `docs/tool-discovery.md` | tags remove unauthorized domains; capable hosts defer and search the permitted native tools |
 
 ## Install
 
@@ -73,7 +73,7 @@ Every request is authenticated, then two middleware run:
 Permitted native tools remain in `tools/list` with their typed schemas. A
 tool-search capable host can defer those definitions and load only the tools
 needed for the current request. Tags narrow the catalogue before that search;
-see `docs/tool-grouping.md`.
+see `docs/tool-discovery.md`.
 
 The structure behind that: one server, seven mounted domain sub-servers, and the
 middleware pipeline every request passes through:

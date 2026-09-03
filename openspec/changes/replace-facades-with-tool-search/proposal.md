@@ -23,4 +23,4 @@ None.
 
 ## Impact
 
-The change affects server assembly, facade middleware, maths and English discovery tests, and `docs/tool-grouping.md`. It removes two public tool names and their broad `operation`/`arguments` interface. Native tools retain their existing names, schemas, domain tags, authorization, audit behaviour, and companion skill resources. No provider SDK or runtime dependency is added because tool search is configured by the MCP host.
+The change affects server assembly, facade middleware, maths and English discovery tests, and `docs/tool-discovery.md`. It removes two public tool names and their broad `operation`/`arguments` interface. Native tools retain their existing names, schemas, domain tags, authorization, audit behaviour, and companion skill resources. No provider SDK or runtime dependency is added because tool search is configured by the MCP host.

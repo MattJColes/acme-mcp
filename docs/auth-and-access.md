@@ -140,7 +140,7 @@ The in-memory client tests produce these counts:
 | `["support"]` | 14 | 6 |
 | `["admin"]` | 15 | 6 |
 
-`engineering` has no entry in `GROUP_TAGS`, so it receives only the public `whoami` tool. A capable host can defer and search the permitted native definitions to reduce model context. See [Tag filtering and tool search](tool-grouping.md).
+`engineering` has no entry in `GROUP_TAGS`, so it receives only the public `whoami` tool. A capable host can defer and search the permitted native definitions to reduce model context. See [Tag filtering and tool search](tool-discovery.md).
 
 ### Known name-disclosure behaviour
 
