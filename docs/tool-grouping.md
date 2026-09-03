@@ -6,12 +6,17 @@ sees 17 tools; four of them are arithmetic. Dumping the lot into a listing is
 how you end up paying for `subtraction`'s input schema in a conversation about
 refunds.
 
-So the server surfaces tools in two layers. Tags decide what a caller can see
-at all. Category facades then act as a per-domain index, so a model can ask
-"what maths can you do?" and get one answer instead of scanning names.
+So the server surfaces tools in three layers. Tags decide what a caller may
+reach at all. Category facades act as a per-domain index, so a model can ask
+"what maths can you do?" and get one answer. And the members a facade fronts
+are dropped from the listing, so the model reads one line for the category
+instead of four tools with full schemas, and only pulls the detail if the
+category is relevant.
 
-The two layers are independent. Tags are enforcement and run on every request.
-Facades are discovery and only ever return what the tag layer already allowed.
+Keep two ideas apart, because the rest of this doc leans on the distinction.
+Permission is what a caller may call, and it never changes here. Visibility is
+what lands in `tools/list`. A hidden tool is still a permitted tool: the facade
+hands the model its name and schema, and that name works on the next turn.
 
 ## Layer One: Tags Decide What Exists
 
@@ -51,28 +56,37 @@ flowchart LR
 
     subgraph server["acme server"]
         audit["AuditLog<br/>outermost"]
+        hide["HideFacadeMembers<br/>listing only"]
         authmw["AuthMiddleware<br/>group_access"]
 
-        subgraph allowed["visible to this caller"]
+        subgraph listed["reaches the model"]
             facade["perform_maths<br/>tag: maths"]
+            rest["get_invoice, export_report,<br/>whoami"]
+        end
+
+        subgraph reachable["permitted, not listed"]
             members["addition, subtraction,<br/>multiplication, division<br/>tag: maths"]
             skill["skill://calculator-usage<br/>frontmatter tag: maths"]
         end
 
-        subgraph denied["filtered out"]
+        subgraph denied["not permitted"]
             other["issue_refund (admin)<br/>order_status (orders)"]
         end
     end
 
-    caller --> audit --> authmw
-    authmw -->|tags intersect| allowed
+    caller --> audit --> hide --> authmw
+    authmw -->|tags intersect| listed
     authmw -.->|no intersection| denied
-    facade -->|"indexes, does not gate"| members
+    hide -.->|"dropped from tools/list"| members
+    facade -->|"names them, with schemas"| members
     facade --> skill
 ```
 
-The important detail is that the facade sits inside the allowed set, not in
-front of it. It is a peer of the tools it lists, not a gate over them.
+Two filters run on a listing, in an order that matters. `AuthMiddleware`
+decides what the caller may reach. `HideFacadeMembers` then looks at what
+survived and drops anything a visible facade already indexes. That ordering is
+why hiding can never strand a tool: it only ever hides behind a door the caller
+can actually see.
 
 ## Layer Two: A Facade Per Category
 
@@ -135,56 +149,100 @@ sequenceDiagram
     actor m as Model
     participant s as acme server
     participant a as AuthMiddleware
+    participant h as HideFacadeMembers
     participant f as perform_maths
     participant t as addition
 
     m->>s: tools/list
     s->>a: filter by caller's tags
-    a-->>m: perform_maths, perform_english, addition, ... (tag-cleared only)
+    a->>h: 13 permitted tools
+    h-->>m: 5 tools - the maths and English members dropped
 
-    note over m: sees the category door, asks it for the detail
+    note over m: reads one line for the category, not eight tools
 
     m->>s: tools/call perform_maths {}
     s->>a: maths cleared? yes
     s->>f: build the index
-    f->>s: mcp.list_tools() under caller's context
-    s->>a: filter again
-    a-->>f: this caller's tools
+    f->>h: list_tools() inside listing_for_facade()
+    note over h: stands down, access check still runs
+    h-->>f: this caller's tools, members included
     f-->>m: 4 tools with schemas + calculator-usage skill
 
     m->>s: tools/call addition {a: 1, b: 2}
-    s->>a: maths cleared? yes
+    s->>a: maths cleared? yes (never listed, still permitted)
     s->>t: execute
     t-->>m: 3
 ```
 
-Note the second filter pass at step 8. The facade does not get a privileged
-view of the server. It sees exactly what the caller sees, which is why it
-cannot name a tool the caller would then be denied.
+The facade never gets a privileged view. Standing hiding down does not stand
+the access check down, so it still sees exactly what the caller may reach, and
+still cannot name a tool the caller would then be denied.
 
 ## What A Caller Actually Sees
 
-One limitation is worth stating plainly, because it is the bit people assume
-wrong. The facade does not hide its members. Both appear in `tools/list`
-together:
+`HideFacadeMembers` in `grouping.py` overrides `on_list_tools` and nothing
+else:
 
-| Group | Tools listed |
-| --- | --- |
-| `engineering` (no grants) | `whoami` |
-| `finance` | 13, including `perform_maths` **and** `addition`, `subtraction`, ... |
-| `support` | 16 |
-| `admin` | 17 |
+```python
+tools = await call_next(context)
+if _listing_for_facade.get():
+    return tools
+doors = {tool.name for tool in tools} & set(self.facades.values())
+hidden = {tag for tag, name in self.facades.items() if name in doors}
+return [t for t in tools if t.name in doors or not (hidden & set(t.tags))]
+```
 
-So a facade currently buys discovery and grouping, not context reduction. A
-model that wants the shape of a domain in one call gets it, but the individual
-tools are still in the listing next to it.
+There is no `on_call_tool`, which is the whole design. Calls go through the
+access check untouched.
 
-Hiding members behind their facade is a small change - drop the category tag
-from the members and give the facade a mount-time filter, or add a `hidden`
-tag the access check strips from listings while still permitting calls. It is
-not done here because the example server has 17 tools and the cost has not
-started to bite. Do it when a domain gets big enough that the listing is the
-problem, not before.
+The effect on the listing:
+
+| Group | Before | After | What is left |
+| --- | --- | --- | --- |
+| `engineering` (no grants) | 1 | 1 | `whoami` |
+| `finance` | 13 | 5 | 2 facades, `get_invoice`, `export_report`, `whoami` |
+| `support` | 16 | 8 | as above plus orders and support tools |
+| `admin` | 17 | 9 | as above plus `issue_refund` |
+
+Eight tools and their schemas leave a finance caller's context, replaced by two
+lines. The saving scales with domain size, which is the argument for doing this
+before a domain gets large rather than after.
+
+### The Facade Has To Opt Out Of Its Own Hiding
+
+`_facade` builds its answer from `mcp.list_tools()`, and that call runs the
+full middleware pipeline. Once hiding is in the pipeline, the facade hides its
+own members from itself and returns an empty list.
+
+The tempting fix is `mcp.list_tools(run_middleware=False)`, which FastMCP
+offers. Do not use it here. That flag skips *all* middleware, including the
+access check, so the facade would happily name tools the caller cannot call.
+
+Instead a context variable asks the hiding middleware to stand down for the
+duration of the facade's own listing:
+
+```python
+with listing_for_facade():
+    listed = await mcp.list_tools()
+```
+
+Everything else in the pipeline still runs, so the access check still applies
+and the facade stays scoped to the caller. One flag, one place, and the
+authorization path is never duplicated.
+
+### Two Things To Know Before Copying This
+
+An unlisted tool loses client-side output validation. FastMCP's `Client` warns
+`Tool addition not listed by server, cannot validate any structured content`
+and hands back the raw result. The call works and the value is correct, but
+the client cannot check it against a schema it was never given. If you rely on
+that validation, hide fewer tools.
+
+Hidden is not denied. A caller who guesses `addition` and is cleared for
+`maths` gets an answer, listed or not. That is intentional, since the facade
+publishes those names on purpose, but it means hiding is a context-budget
+tool, not a security control. Access control is `group_access`, and it did not
+change.
 
 ## Adding A Category
 
@@ -192,15 +250,18 @@ Three steps, no framework:
 
 1. Tag the tools in a domain sub-server, for example `tags={"reports"}`.
 2. Grant the tag to whichever groups need it in `GROUP_TAGS`.
-3. Register the door in `build_server`:
+3. Register the door in `build_server` and add its tag to the `facades` map,
+   which is what tells `HideFacadeMembers` which members to drop:
 
 ```python
-_facade(
-    mcp,
-    name="perform_reports",
-    tag="reports",
-    description="List the available reporting tools and companion skills.",
-)
+facades = {
+    "reports": _facade(
+        mcp,
+        name="perform_reports",
+        tag="reports",
+        description="List the available reporting tools and companion skills.",
+    ),
+}
 ```
 
 The facade inherits the tag, so it appears and disappears with the domain it
@@ -217,7 +278,7 @@ python -m pytest -q
 ```
 
 ```
-110 passed in 5.02s
+113 passed in 5.42s
 ```
 
 The tests that matter for this doc:
@@ -231,12 +292,19 @@ The tests that matter for this doc:
 | `test_facade_named_tool_is_callable` | a name returned by the facade actually works |
 | `test_facade_companion_skill_uri_is_readable` | the returned `skill://` URI resolves to real content |
 | `test_facade_contents_are_scoped_to_the_caller` | a caller cleared for one category only sees that category inside the facade |
+| `test_members_are_hidden_from_listing_but_still_callable` | the listing carries the door, and the hidden name still works |
+| `test_hiding_does_not_grant_access` | an uncleared caller guessing a hidden name is still refused |
+| `test_members_stay_listed_when_their_facade_is_not` | no tool is stranded when its door is missing from the listing |
 
-That last one is the one worth reading. It grants a synthetic group the `maths`
-tag and nothing else, then checks the facade's answer against what the caller
-can actually run. Without it, every real group holds both `maths` and
-`english`, so a facade that ignored auth entirely and filtered on tags alone
-would still pass every other test.
+`test_facade_contents_are_scoped_to_the_caller` is the one worth reading. It
+grants a synthetic group the `maths` tag and nothing else, then checks the
+facade's answer against what the caller can actually run. Without it, every
+real group holds both `maths` and `english`, so a facade that ignored auth
+entirely and filtered on tags alone would still pass every other test.
+
+`tests/test_maths.py` and `tests/test_english.py` assert the same contract from
+the other end: each tool is absent from `tools/list`, present in its facade's
+answer, and still carrying its domain tag.
 
 To see the layering by hand, list tools as each group against the in-memory
 client:
@@ -261,12 +329,14 @@ Which prints, at the time of writing:
 
 ```
 ['engineering'] ['whoami']
-['finance'] ['addition', 'division', 'export_report', 'get_invoice',
-             'multiplication', 'noun_count', 'perform_english', 'perform_maths',
-             'subtraction', 'verb_count', 'vowel_count', 'whoami', 'word_count']
-['support'] [... 16 tools ...]
-['admin'] [... 17 tools ...]
+['finance'] ['export_report', 'get_invoice', 'perform_english', 'perform_maths',
+             'whoami']
+['support'] ['draft_refund_email', 'export_report', 'get_invoice',
+             'order_status', 'perform_english', 'perform_maths',
+             'support_macro', 'whoami']
+['admin'] ['draft_refund_email', 'export_report', 'get_invoice', 'issue_refund',
+           'order_status', 'perform_english', 'perform_maths', 'support_macro',
+           'whoami']
 ```
 
-The `engineering` row is the one to look at. No grants in `GROUP_TAGS` means no
-domain tags, so the facades vanish along with everything they index.
+Not an arithmetic tool in sight, and every one of them still callable.

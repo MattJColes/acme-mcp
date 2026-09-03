@@ -112,3 +112,50 @@ async def test_facade_contents_are_scoped_to_the_caller(server, monkeypatch):
     assert {skill["name"] for skill in data["skills"]} == {"calculator-usage"}
     assert not ENGLISH_TOOLS & names
     assert "perform_english" not in names
+
+
+async def test_members_are_hidden_from_listing_but_still_callable(server):
+    """The point of the facade: the listing carries the door, not the members.
+
+    Hiding is a listing concern only. The facade hands the model a name and an
+    input schema, and that name has to work on the next turn.
+    """
+    with as_caller(groups=["admin"]):
+        async with Client(server) as client:
+            listed = {tool.name for tool in await client.list_tools()}
+            result = await client.call_tool("multiplication", {"a": 3, "b": 4})
+
+    assert "perform_maths" in listed and "perform_english" in listed
+    assert not (MATHS_TOOLS | ENGLISH_TOOLS) & listed
+    assert result.data == 12
+
+
+async def test_hiding_does_not_grant_access(server):
+    """Hiding loosens visibility, never permission. An uncleared caller who
+    guesses a hidden name is still refused by the access check."""
+    with as_caller(groups=["engineering"]):
+        async with Client(server) as client:
+            with pytest.raises(Exception) as excinfo:
+                await client.call_tool("addition", {"a": 1, "b": 2})
+
+    message = str(excinfo.value).lower()
+    assert "permission" in message or "authorization" in message
+
+
+async def test_members_stay_listed_when_their_facade_is_not(server):
+    """Never strand a tool. If the door is missing from the listing, the
+    members it would have fronted are left in place rather than hidden."""
+    from acme_mcp.grouping import HideFacadeMembers
+
+    class FakeTool:
+        def __init__(self, name, tags):
+            self.name, self.tags = name, tags
+
+    tools = [FakeTool("addition", {"maths"}), FakeTool("whoami", {"public"})]
+    middleware = HideFacadeMembers({"maths": "perform_maths"})
+
+    async def call_next(_context):
+        return tools
+
+    kept = await middleware.on_list_tools(None, call_next)
+    assert {tool.name for tool in kept} == {"addition", "whoami"}

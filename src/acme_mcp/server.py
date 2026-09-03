@@ -9,6 +9,9 @@ This is where the pieces fit together, in the order the blog post builds them:
 4. Wrap every tool call in audit logging (:class:`acme_mcp.audit.AuditLog`).
 5. Filter the components each caller sees and can use by their group
    (:func:`acme_mcp.access.build_access_middleware`).
+6. Drop the tools a category facade already fronts from ``tools/list``, so the
+   model reads one line per category instead of every tool in it
+   (:class:`acme_mcp.grouping.HideFacadeMembers`). They stay callable.
 
 A local stdio server is a convenience; a remote HTTP server is production
 infrastructure and gets treated like it. ``main`` runs stdio by default and
@@ -32,6 +35,7 @@ from acme_mcp.domains.maths import maths_server
 from acme_mcp.domains.orders import orders_server
 from acme_mcp.domains.reports import reports_server
 from acme_mcp.domains.support import support_server
+from acme_mcp.grouping import HideFacadeMembers, listing_for_facade
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 
@@ -46,17 +50,23 @@ ANALYTICS_URL = os.environ.get(
 SKILLS_DIR = Path(__file__).parent / "skills"
 
 
-def _facade(mcp: FastMCP, *, name: str, tag: str, description: str) -> None:
-    """Register a no-argument tool describing one tagged domain."""
+def _facade(mcp: FastMCP, *, name: str, tag: str, description: str) -> str:
+    """Register a no-argument tool describing one tagged domain.
+
+    Returns the facade's name, so ``build_server`` can tell
+    :class:`~acme_mcp.grouping.HideFacadeMembers` which door fronts which tag.
+    """
 
     async def facade() -> dict:
+        with listing_for_facade():
+            listed = await mcp.list_tools()
         tools = [
             {
                 "name": tool.name,
                 "description": tool.description,
                 "input_schema": tool.parameters,
             }
-            for tool in await mcp.list_tools()
+            for tool in listed
             if tag in tool.tags and tool.name != name
         ]
         skills = []
@@ -83,6 +93,7 @@ def _facade(mcp: FastMCP, *, name: str, tag: str, description: str) -> None:
         }
 
     mcp.tool(facade, name=name, description=description, tags={tag})
+    return name
 
 
 def build_server(env: str | None = None) -> FastMCP:
@@ -113,22 +124,27 @@ def build_server(env: str | None = None) -> FastMCP:
         mcp.mount(sub)
 
     mcp.add_provider(SkillsDirectoryProvider(roots=SKILLS_DIR))
-    _facade(
-        mcp,
-        name="perform_maths",
-        tag="maths",
-        description="List the available maths operations and companion skills.",
-    )
-    _facade(
-        mcp,
-        name="perform_english",
-        tag="english",
-        description="List the available English analysis tools and companion skills.",
-    )
+    facades = {
+        "maths": _facade(
+            mcp,
+            name="perform_maths",
+            tag="maths",
+            description="List the available maths operations and companion skills.",
+        ),
+        "english": _facade(
+            mcp,
+            name="perform_english",
+            tag="english",
+            description="List the available English analysis tools and companion skills.",
+        ),
+    }
 
-    # Audit first so it wraps the outermost call; the access middleware sits
-    # inside it and decides who may reach each tool.
+    # Audit first so it wraps the outermost call. Then the two filters, in the
+    # order their results depend on each other: the access middleware runs
+    # innermost and decides who may reach each tool, and HideFacadeMembers sees
+    # what survived that, so it only ever hides behind a door the caller can see.
     mcp.add_middleware(AuditLog())
+    mcp.add_middleware(HideFacadeMembers(facades))
     mcp.add_middleware(build_access_middleware())
     return mcp
 
