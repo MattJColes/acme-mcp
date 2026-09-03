@@ -59,12 +59,17 @@ async def test_uncleared_caller_cannot_see_or_call_facades(server):
 
 
 async def test_facade_named_tool_is_callable(server):
+    """A name the facade returns can be run, through the facade that named it."""
     with as_caller(groups=["admin"]):
         async with Client(server) as client:
             facade = (await client.call_tool("perform_maths", {})).data
             assert "addition" in {tool["name"] for tool in facade["tools"]}
-            result = await client.call_tool("addition", {"a": 1, "b": 2})
-    assert result.data == 3
+            result = await client.call_tool(
+                "perform_maths",
+                {"operation": "addition", "arguments": {"a": 1, "b": 2}},
+            )
+    assert result.data["result"] == 3
+    assert result.data["operation"] == "addition"
 
 
 @pytest.mark.parametrize(
@@ -114,20 +119,53 @@ async def test_facade_contents_are_scoped_to_the_caller(server, monkeypatch):
     assert "perform_english" not in names
 
 
-async def test_members_are_hidden_from_listing_but_still_callable(server):
-    """The point of the facade: the listing carries the door, not the members.
+async def test_a_model_reaches_hidden_members_only_through_the_facade(server):
+    """Exercise the path a real host takes, not the one ``Client`` allows.
 
-    Hiding is a listing concern only. The facade hands the model a name and an
-    input schema, and that name has to work on the next turn.
+    A host hands the model exactly the tools that came back from ``tools/list``
+    and will only dispatch a name from that set. So a hidden member is not in
+    the model's vocabulary at all, and calling it by name -- which ``Client``
+    happily permits -- proves nothing about whether the model can reach it.
+    Routing through the facade is the only path that exists, so it is the path
+    the tests have to walk.
     """
     with as_caller(groups=["admin"]):
         async with Client(server) as client:
-            listed = {tool.name for tool in await client.list_tools()}
-            result = await client.call_tool("multiplication", {"a": 3, "b": 4})
+            offered = {tool.name for tool in await client.list_tools()}
+            assert "perform_maths" in offered
+            assert not (MATHS_TOOLS | ENGLISH_TOOLS) & offered
 
-    assert "perform_maths" in listed and "perform_english" in listed
-    assert not (MATHS_TOOLS | ENGLISH_TOOLS) & listed
-    assert result.data == 12
+            index = (await client.call_tool("perform_maths", {})).data
+            operation = index["tools"][0]["name"]
+            assert operation not in offered  # named, but never listed
+
+            result = (
+                await client.call_tool(
+                    "perform_maths",
+                    {"operation": "multiplication", "arguments": {"a": 3, "b": 4}},
+                )
+            ).data
+
+    assert result["result"] == 12
+
+
+@pytest.mark.parametrize(
+    "operation", ["sqrt", "vowel_count", "issue_refund", "perform_maths"]
+)
+async def test_facade_refuses_anything_outside_its_own_domain(server, operation):
+    """Unknown, another domain's, and the facade itself are all one answer.
+
+    The facade dispatches only to the members it just listed for this caller,
+    so it cannot be used as a way around the access check or the domain split.
+    """
+    with as_caller(groups=["admin"]):
+        async with Client(server) as client:
+            with pytest.raises(Exception) as excinfo:
+                await client.call_tool(
+                    "perform_maths", {"operation": operation, "arguments": {}}
+                )
+
+    assert "unknown maths operation" in str(excinfo.value).lower()
 
 
 async def test_hiding_does_not_grant_access(server):

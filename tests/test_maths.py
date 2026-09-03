@@ -32,6 +32,15 @@ async def test_maths_tools_are_tagged_and_fronted_by_the_facade(server, tool):
     assert tool in {item["name"] for item in fronted}
     assert "maths" in (await server.get_tool(tool)).tags
 
+    with as_caller(groups=["admin"]):
+        async with Client(server) as client:
+            dispatched = (
+                await client.call_tool(
+                    "perform_maths", {"operation": tool, "arguments": {"a": 6, "b": 3}}
+                )
+            ).data
+    assert dispatched["operation"] == tool
+
 
 async def test_addition_int_and_float(server):
     with as_caller(groups=["admin"]):

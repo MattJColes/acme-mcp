@@ -24,6 +24,7 @@ import os
 from pathlib import Path
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 
 from acme_mcp.access import build_access_middleware
 from acme_mcp.audit import AuditLog
@@ -51,24 +52,53 @@ SKILLS_DIR = Path(__file__).parent / "skills"
 
 
 def _facade(mcp: FastMCP, *, name: str, tag: str, description: str) -> str:
-    """Register a no-argument tool describing one tagged domain.
+    """Register the single tool that fronts one tagged domain.
+
+    The facade is the only tool from its domain that reaches the model, so it
+    has to do both jobs. Called with no arguments it returns the domain's index
+    (every member's name, description and input schema, plus companion skills).
+    Called with an ``operation`` it runs that member and returns its result.
+
+    Dispatch is not a convenience. A host hands the model exactly the tools that
+    came back from ``tools/list``, so a member hidden from that listing is not
+    in the model's vocabulary and it can never emit a call for one. Publishing
+    the schema in a result does not change that: the schema is result data, not
+    a tool definition. Routing through the facade is what makes a hidden member
+    reachable at all.
 
     Returns the facade's name, so ``build_server`` can tell
     :class:`~acme_mcp.grouping.HideFacadeMembers` which door fronts which tag.
     """
 
-    async def facade() -> dict:
+    async def facade(
+        operation: str | None = None, arguments: dict | None = None
+    ) -> dict:
+        # The members, as this caller sees them. Listing through the normal
+        # pipeline is what applies the access check; hiding stands down so the
+        # facade can see what it exists to front.
         with listing_for_facade():
             listed = await mcp.list_tools()
-        tools = [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.parameters,
-            }
+        members = {
+            tool.name: tool
             for tool in listed
             if tag in tool.tags and tool.name != name
-        ]
+        }
+
+        if operation is not None:
+            if operation not in members:
+                # Names an operation this caller cannot reach, whether it is
+                # unknown, another domain's, or one they are not cleared for.
+                raise ToolError(f"Unknown {tag} operation: {operation}")
+            result = await mcp.call_tool(operation, arguments or {})
+            # FastMCP wraps a non-dict return under "result"; unwrap it so the
+            # facade's own "result" key holds the value, not a nested envelope.
+            structured = result.structured_content or {}
+            return {
+                "category": tag,
+                "operation": operation,
+                "result": structured.get("result", structured),
+            }
+
         skills = []
         for resource in await mcp.list_resources():
             info = getattr(resource, "skill_info", None)
@@ -88,7 +118,14 @@ def _facade(mcp: FastMCP, *, name: str, tag: str, description: str) -> str:
         return {
             "category": tag,
             "description": description,
-            "tools": tools,
+            "tools": [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.parameters,
+                }
+                for tool in members.values()
+            ],
             "skills": skills,
         }
 

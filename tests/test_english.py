@@ -25,6 +25,15 @@ async def test_english_tools_are_tagged_and_fronted_by_the_facade(server, tool):
     assert tool in {item["name"] for item in fronted}
     assert "english" in (await server.get_tool(tool)).tags
 
+    with as_caller(groups=["admin"]):
+        async with Client(server) as client:
+            dispatched = (
+                await client.call_tool(
+                    "perform_english", {"operation": tool, "arguments": {"text": "a cat ran"}}
+                )
+            ).data
+    assert dispatched["operation"] == tool
+
 
 async def test_vowel_count(server):
     with as_caller(groups=["admin"]):
