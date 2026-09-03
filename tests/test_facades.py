@@ -94,3 +94,21 @@ async def test_facade_companion_skill_uri_is_readable(
             assert skills[skill]["uri"] == f"skill://{skill}/SKILL.md"
             result = await client.read_resource(skills[skill]["uri"])
     assert heading in result[0].text
+
+
+async def test_facade_contents_are_scoped_to_the_caller(server, monkeypatch):
+    """Every real group holds both maths and english, so tag filtering alone
+    would pass the tests above. A caller cleared for maths only proves the
+    facade derives its answer under the caller's own auth context."""
+    from acme_mcp import auth
+
+    monkeypatch.setitem(auth.GROUP_TAGS, "mathsonly", {"maths"})
+    with as_caller(groups=["mathsonly"]):
+        async with Client(server) as client:
+            data = (await client.call_tool("perform_maths", {})).data
+            names = {tool.name for tool in await client.list_tools()}
+
+    assert {tool["name"] for tool in data["tools"]} == MATHS_TOOLS
+    assert {skill["name"] for skill in data["skills"]} == {"calculator-usage"}
+    assert not ENGLISH_TOOLS & names
+    assert "perform_english" not in names

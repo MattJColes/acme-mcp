@@ -20,6 +20,7 @@ can see how the pieces fit instead of stitching them together yourself.
 | File delivery | `src/acme_mcp/domains/reports.py` + `storage.py` | upload to S3, return a short-lived signed URL — never the bytes |
 | Composition | `src/acme_mcp/server.py` | mount in-process domains; proxy a separately-owned one |
 | Companion skill | `src/acme_mcp/skills/handle-downloads/SKILL.md` | a reports-scoped skill published by the MCP server |
+| Tool grouping | `docs/tool-grouping.md` | how tags gate a listing and category facades index a domain |
 
 ## Install
 
