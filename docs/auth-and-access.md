@@ -2,7 +2,7 @@
 
 ## Summary
 
-Every request passes through two checks. The authentication provider verifies the bearer token and supplies its claims. The access middleware maps the token's `groups` claim to component tags and decides whether the caller can see or use each component.
+Every request passes through two checks. Authentication verifies the bearer token and establishes who is calling. Authorization maps the token's `groups` claim to component tags, which controls what the caller can discover and execute.
 
 The same access function runs during discovery and use:
 
@@ -11,7 +11,7 @@ The same access function runs during discovery and use:
 | `tools/list`, `resources/list`, `prompts/list` | The component appears | The component is removed from the response |
 | `tools/call`, `resources/read`, `prompts/get` | The request continues | FastMCP returns an authorization error |
 
-This keeps restricted tools out of the model's context and still blocks a direct call when someone guesses a hidden name.
+Components include individual tools and category facades such as `perform_maths`. Without a matching tag, FastMCP removes the component from discovery and rejects direct use when someone guesses its name.
 
 ## Example
 
@@ -38,6 +38,8 @@ whoami
 ```
 
 The same caller cannot see or call `issue_refund`, which carries the `admin` tag. Any authenticated caller can call `whoami` because it carries the `public` tag.
+
+With `groups: ["engineering"]`, the listing contains only `whoami`. `perform_maths` and `issue_refund` stay out of the listing, and direct calls to either fail the same access check.
 
 ## Technical detail
 
