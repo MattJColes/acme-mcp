@@ -59,3 +59,32 @@ async def test_audit_records_errors(caplog):
     # The tool's ValueError surfaces to middleware wrapped as a ToolError; what
     # matters for the audit trail is that the failure is recorded, not swallowed.
     assert rec.error == "ToolError"
+
+
+async def test_blocked_call_is_still_audited(caplog):
+    """A refusal nobody logged is a refusal nobody can investigate.
+
+    ``AuditLog`` is registered before the access middleware so it wraps the
+    outermost call, which is what makes a denied attempt land in the log
+    alongside the caller and their groups. Uses the assembled server rather
+    than the local fixture, since the denial comes from the access middleware.
+    """
+    from acme_mcp.server import build_server
+
+    caplog.set_level(logging.INFO, logger="acme_mcp.audit")
+    with as_caller(groups=["engineering"]):  # cleared for no business domain
+        async with Client(build_server(env="dev")) as client:
+            try:
+                await client.call_tool(
+                    "issue_refund", {"order_id": "A1", "amount": 5.0}
+                )
+            except Exception:
+                pass
+
+    rec = next(
+        r
+        for r in caplog.records
+        if r.name == "acme_mcp.audit" and r.tool == "issue_refund"
+    )
+    assert rec.groups == ["engineering"]
+    assert rec.error == "AuthorizationError"

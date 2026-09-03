@@ -12,8 +12,8 @@ can see how the pieces fit instead of stitching them together yourself.
 
 | Concern | Where | What it shows |
 | --- | --- | --- |
-| Auth | `src/acme_mcp/auth.py` | `JWTVerifier` in prod, `StaticTokenVerifier` for local dev; the group → tag map |
-| Per-group access | `src/acme_mcp/access.py` | FastMCP `AuthMiddleware`: hides components **and** blocks direct use |
+| Auth | `src/acme_mcp/auth.py` + `docs/auth-and-access.md` | `JWTVerifier` in prod, `StaticTokenVerifier` for local dev; the group → tag map |
+| Per-group access | `src/acme_mcp/access.py` + `docs/auth-and-access.md` | FastMCP `AuthMiddleware`: hides components **and** blocks direct use |
 | Audit trail | `src/acme_mcp/audit.py` | `AuditLog` middleware logging user / groups / tool / timing on every call |
 | Deterministic domains | `src/acme_mcp/domains/{orders,billing,admin}.py` | plain typed tools over a data backend |
 | Agent behind a tool | `src/acme_mcp/domains/support.py` + `agents.py` | an injectable, mockable inner agent on a tight leash |
