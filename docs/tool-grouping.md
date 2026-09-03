@@ -2,7 +2,7 @@
 
 ## Summary
 
-MCP hosts build the model's available toolset from `tools/list`. Large tool listings consume context on every turn and give the model more schemas to choose between.
+Tool grouping reduces the model context used by large MCP servers. An MCP host adds every definition from `tools/list` to the model's context, including tools that have nothing to do with the current request.
 
 This server groups related tools behind category facades. A finance caller sees `perform_maths` in the top-level listing while `addition`, `division`, `multiplication`, and `subtraction` stay hidden. The facade supports two calls:
 
@@ -12,6 +12,8 @@ This server groups related tools behind category facades. A finance caller sees 
 | `perform_maths {"operation": "addition", "arguments": {"a": 1, "b": 2}}` | Run `addition` through the normal server pipeline |
 
 Authorization still applies to every facade and member. Grouping changes what the host offers the model. It does not grant any extra access.
+
+Each facade replaces every member definition in its category with one top-level definition. The initial listing adds one definition per category, so member count no longer determines its size. Member schemas enter the conversation only after the model asks for that category.
 
 ## Example
 
@@ -70,6 +72,31 @@ The response keeps the category and operation in the result:
 ```
 
 A direct `addition` call is unavailable to a normal host because `addition` did not appear in `tools/list`. The facade is the route to every hidden member.
+
+This sequence shows when each schema enters the model's context and how a hidden member is called:
+
+```mermaid
+sequenceDiagram
+    actor Model
+    participant Host as MCP host
+    participant Server as acme-mcp
+
+    Host->>Server: tools/list
+    Server-->>Host: perform_maths, member tools hidden
+    Host-->>Model: offer perform_maths schema
+
+    Model->>Host: perform_maths {}
+    Host->>Server: tools/call perform_maths
+    Server->>Server: resolve permitted maths members
+    Server-->>Host: category index and member schemas
+    Host-->>Model: add maths index to context
+
+    Model->>Host: perform_maths {operation: addition}
+    Host->>Server: tools/call perform_maths
+    Server->>Server: authorize and call addition
+    Server-->>Host: {result: 3}
+    Host-->>Model: return result
+```
 
 ## Technical detail
 
