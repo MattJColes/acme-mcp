@@ -20,7 +20,7 @@ can see how the pieces fit instead of stitching them together yourself.
 | File delivery | `src/acme_mcp/domains/reports.py` + `storage.py` | upload to S3, return a short-lived signed URL — never the bytes |
 | Composition | `src/acme_mcp/server.py` | mount in-process domains; proxy a separately-owned one |
 | Companion skill | `src/acme_mcp/skills/handle-downloads/SKILL.md` | a reports-scoped skill published by the MCP server |
-| Tool grouping | `src/acme_mcp/grouping.py` + `docs/tool-grouping.md` | facades front a category; members drop out of `tools/list` but stay callable |
+| Domain filtering and tool search | `src/acme_mcp/auth.py` + `docs/tool-discovery.md` | tags remove unauthorized domains; capable hosts defer and search the permitted native tools |
 
 ## Install
 
@@ -58,8 +58,9 @@ uses the real boto3 client and expects the export bucket to exist.
 
 In `dev`, the `StaticTokenVerifier` accepts these bearer tokens, each mapped to a
 group: `dev-support`, `dev-finance`, `dev-admin` (see `auth.py`). A `support`
-caller sees orders/billing/support/reports tools; `finance` sees billing/reports;
-`admin` sees everything.
+caller sees orders, billing, support, reports, maths, and English tools;
+`finance` sees billing, reports, maths, and English tools; `admin` sees
+everything.
 
 ## How access control works
 
@@ -69,12 +70,12 @@ Every request is authenticated, then two middleware run:
 2. FastMCP's `AuthMiddleware` hides components the caller isn't cleared for and
    blocks direct use, so guessing a hidden tool or resource still fails.
 
-A third middleware, `HideFacadeMembers`, then trims the listing only: tools a
-visible `perform_<category>` facade already indexes are dropped from
-`tools/list` but remain callable by name. That is a context-budget measure, not
-an access control one - see `docs/tool-grouping.md`.
+Permitted native tools remain in `tools/list` with their typed schemas. A
+tool-search capable host can defer those definitions and load only the tools
+needed for the current request. Tags narrow the catalogue before that search;
+see `docs/tool-discovery.md`.
 
-The structure behind that: one server, five mounted domain sub-servers, and the
+The structure behind that: one server, seven mounted domain sub-servers, and the
 middleware pipeline every request passes through:
 
 ```mermaid
@@ -90,6 +91,8 @@ C4Container
         Container(support, "support server", "FastMCP sub-server", "support_macro, draft_refund_email (tag: support)")
         Container(admin, "admin server", "FastMCP sub-server", "issue_refund (tag: admin)")
         Container(reports, "reports server", "FastMCP sub-server", "export_report (tag: reports) + skill://handle-downloads resource")
+        Container(maths, "maths server", "FastMCP sub-server", "four typed arithmetic tools (tag: maths)")
+        Container(english, "English server", "FastMCP sub-server", "four typed text-analysis tools (tag: english)")
         Container(root, "root tools", "FastMCP", "whoami (tag: public — every authenticated caller)")
     }
 
@@ -106,12 +109,15 @@ C4Container
     Rel(mw, support, " ", "")
     Rel(mw, admin, " ", "")
     Rel(mw, reports, " ", "")
+    Rel(mw, maths, " ", "")
+    Rel(mw, english, " ", "")
     Rel(mw, idp, "Verify JWT via JWKS", "HTTPS")
     Rel(support, agent, "Prompt w/ validated order_id", "")
     Rel(reports, s3, " ", "")
 ```
 
-Tools are tagged by domain (`orders`, `billing`, `admin`, `support`, `reports`);
+Tools are tagged by domain (`orders`, `billing`, `admin`, `support`, `reports`,
+`maths`, `english`);
 `GROUP_TAGS` in `auth.py` maps each org group to the tags it may use. The
 identity tool `whoami` is tagged `public` so any authenticated caller can see it.
 The `handle-downloads` skill is tagged `reports`, so the same groups that can
@@ -134,7 +140,7 @@ sequenceDiagram
     participant d as Domain tool
     participant l as AuditLog
 
-    note over u,l: GROUP_TAGS - support: orders, billing, support, reports | finance: billing, reports | admin: * (wildcard, incl. future domains) | unknown group: public only
+    note over u,l: GROUP_TAGS - support: orders, billing, support, reports, maths, english | finance: billing, reports, maths, english | admin: * | unknown group: public only
 
     u->>s: connect with token (dev bearer or IdP JWT)
     s->>a: verify token, read groups claim
@@ -142,7 +148,7 @@ sequenceDiagram
 
     u->>s: tools/list
     s->>a: keep tools whose tags intersect allowed tags
-    a-->>u: filtered list (support sees 6 tools, unknown group sees only whoami)
+    a-->>u: filtered list (support sees 14 tools, unknown group sees only whoami)
 
     alt tag cleared - support calls order_status
         u->>s: tools/call order_status(order_id)
