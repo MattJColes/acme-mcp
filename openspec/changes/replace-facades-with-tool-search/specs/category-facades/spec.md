@@ -1,15 +1,11 @@
-# Category Facades Specification
-
-## Purpose
-
-Per-domain entry points that let a caller discover a category's
-sub-tools and companion skills in a single call: a `perform_<category>`
-tool surfaces the particulars of the domain it represents, scoped to
-what the caller is cleared for.
-
-## Requirements
+## REMOVED Requirements
 
 ### Requirement: Facade surfaces the category's particulars
+
+<!-- anchor: facades.perform -->
+**Reason**: The facade hides native tool definitions from host-provided tool search and replaces their typed interfaces with a broad `operation` and `arguments` call.
+
+**Migration**: Call `addition`, `subtraction`, `multiplication`, `division`, `vowel_count`, `noun_count`, `verb_count`, and `word_count` directly. Tool-search capable hosts can defer these native definitions; other hosts receive the caller's permitted tools from `tools/list`.
 
 The server SHALL expose a `perform_maths` tool (tag `maths`) and a
 `perform_english` tool (tag `english`), each callable with no

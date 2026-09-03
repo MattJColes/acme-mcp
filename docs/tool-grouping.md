@@ -1,247 +1,289 @@
-# Tool grouping and surfacing
+# Tag filtering and tool search
 
 ## Summary
 
-Tool grouping reduces the model context used by large MCP servers. An MCP host adds every definition from `tools/list` to the model's context, including tools that have nothing to do with the current request.
+Large MCP servers can spend a meaningful part of the model context on tool
+definitions. This server reduces that catalogue in two stages:
 
-This server groups related tools behind category facades. A finance caller sees `perform_maths` in the top-level listing while `addition`, `division`, `multiplication`, and `subtraction` stay hidden. The facade supports two calls:
+1. The server maps the caller's identity groups to domain tags and removes
+   tools and resources the caller cannot use.
+2. A tool-search capable host defers the remaining native tool definitions and
+   loads the small set needed for the current request.
 
-| Call | Purpose |
-| --- | --- |
-| `perform_maths {}` | Return the permitted maths operations, their input schemas, and related skills |
-| `perform_maths {"operation": "addition", "arguments": {"a": 1, "b": 2}}` | Run `addition` through the normal server pipeline |
+The first stage is access control. The second stage is where context use falls.
+Keeping the stages separate leaves every permitted tool available under its
+real name with its typed input schema.
 
-Authorization still applies to every facade and member. Grouping changes what the host offers the model. It does not grant any extra access.
-
-Each facade replaces every member definition in its category with one top-level definition. The initial listing adds one definition per category, so member count no longer determines its size. Member schemas enter the conversation only after the model asks for that category.
+Clients without tool search receive the complete permitted catalogue from
+`tools/list`. For this example that is at most 15 tools. The same approach also
+works for a much larger server, where deferred loading saves more context.
 
 ## Example
 
-A finance caller starts with this toolset:
+A finance token contains this claim:
 
-```text
-export_report
-get_invoice
-perform_english
-perform_maths
-whoami
+```json
+{"sub": "finance@acme.dev", "groups": ["finance"]}
 ```
 
-The model calls `perform_maths` with no arguments and receives an index. This excerpt shows one of the four maths tools and omits some generated schema fields:
+`GROUP_TAGS` grants that caller the `billing`, `reports`, `maths`, and
+`english` domains. The public tag is added for every authenticated caller. The
+server therefore returns these native tools:
+
+```text
+whoami
+get_invoice
+export_report
+addition
+subtraction
+multiplication
+division
+vowel_count
+noun_count
+verb_count
+word_count
+```
+
+Each definition keeps its own schema. The `addition` entry includes two typed
+arguments:
 
 ```json
 {
-  "category": "maths",
-  "description": "List the available maths operations and companion skills.",
+  "name": "addition",
+  "description": "Add two numbers.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "a": {"anyOf": [{"type": "integer"}, {"type": "number"}]},
+      "b": {"anyOf": [{"type": "integer"}, {"type": "number"}]}
+    },
+    "required": ["a", "b"]
+  }
+}
+```
+
+A host with deferred tool search can initially expose only the `acme` server
+description and its search tool to the model. When the user asks for a sum, the
+host loads `addition` and calls it directly:
+
+```json
+{"name": "addition", "arguments": {"a": 1, "b": 2}}
+```
+
+The result is `3`. Authorization runs again on the call, so a caller without
+the `maths` grant cannot use the tool even if they guess its name.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Host as MCP host
+    participant Server as acme-mcp
+    participant Access as AuthMiddleware
+    participant Search as Host tool search
+    participant Model
+
+    User->>Host: Add 1 and 2
+    Host->>Server: tools/list with finance token
+    Server->>Access: groups = finance
+    Access-->>Server: billing, reports, maths, english, public
+    Server-->>Host: permitted native tools
+    Host->>Search: index permitted definitions
+    Host-->>Model: acme summary and tool search
+    Model->>Search: find a tool that adds numbers
+    Search-->>Model: addition schema
+    Model->>Host: addition {a: 1, b: 2}
+    Host->>Server: tools/call addition
+    Server->>Access: enforce maths grant
+    Server-->>Host: 3
+    Host-->>Model: tool result
+```
+
+## Technical detail
+
+### Tags define server-side domains
+
+Each tool carries the tag for its domain:
+
+```python
+@maths_server.tool(tags={"maths"})
+def addition(a: int | float, b: int | float) -> int | float:
+    """Add two numbers."""
+    return a + b
+```
+
+`GROUP_TAGS` maps identity groups to those domain tags:
+
+```python
+GROUP_TAGS = {
+    "support": {"orders", "billing", "support", "reports", "maths", "english"},
+    "finance": {"billing", "reports", "maths", "english"},
+    "admin": {ALL_TAGS},
+}
+```
+
+FastMCP's `AuthMiddleware` uses the same access function for discovery and
+execution. Unauthorized tools disappear from `tools/list`, and direct calls to
+their names fail authorization.
+
+Tags group tools effectively inside this server because one grant controls a
+whole domain. They also let a new tagged tool inherit the existing access rule
+without adding its name to a second allowlist.
+
+### Tool search works on the permitted catalogue
+
+The providers document search over tool names, descriptions, argument names,
+and argument descriptions. FastMCP tags remain server metadata and are not a
+documented provider search input.
+
+This gives each piece one responsibility:
+
+| Stage | Input | Output | Purpose |
+| --- | --- | --- | --- |
+| Server access filter | Verified groups and component tags | Permitted tools and resources | Prevent discovery and use of unauthorized domains |
+| Host tool search | Permitted native tool metadata | A small set of loaded tool definitions | Reduce model context and focus selection |
+
+Clear names and descriptions still matter. A phrase such as "add two numbers"
+can match `addition`; the `maths` tag decides whether that definition enters the
+searchable catalogue in the first place.
+
+The current server listings are:
+
+| Group | Native tools listed |
+| --- | ---: |
+| `engineering` | 1 |
+| `finance` | 11 |
+| `support` | 14 |
+| `admin` | 15 |
+
+These counts describe server discovery. The number of definitions placed in
+the model context depends on the host and its deferred-loading configuration.
+
+### OpenAI configuration
+
+OpenAI's [tool search guide](https://developers.openai.com/api/docs/guides/tools-tool-search)
+requires a `tool_search` entry and `defer_loading: true` on the MCP server tool.
+The model initially receives the server label and description, then loads
+individual tools when needed.
+
+This is the relevant part of a Responses API request:
+
+```json
+{
   "tools": [
     {
-      "name": "addition",
-      "description": "Add two numbers.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "a": {"anyOf": [{"type": "integer"}, {"type": "number"}]},
-          "b": {"anyOf": [{"type": "integer"}, {"type": "number"}]}
-        },
-        "required": ["a", "b"]
-      }
+      "type": "mcp",
+      "server_label": "acme",
+      "server_description": "Order, billing, support, reporting, maths and English tools. Access is filtered by the caller's groups.",
+      "server_url": "https://mcp.acme.example/mcp",
+      "authorization": "<caller access token>",
+      "defer_loading": true
+    },
+    {"type": "tool_search"}
+  ]
+}
+```
+
+The `authorization` value must carry the caller identity used by this server's
+group-to-tag check. OpenAI documents the full remote-server fields in its
+[MCP guide](https://developers.openai.com/api/docs/guides/tools-connectors-mcp).
+
+### Claude configuration
+
+Claude's [tool search guide](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool)
+offers regex and BM25 variants. BM25 accepts natural-language searches. With
+the MCP connector, deferred loading is configured on the `mcp_toolset` entry:
+
+```json
+{
+  "mcp_servers": [
+    {
+      "type": "url",
+      "url": "https://mcp.acme.example/mcp",
+      "name": "acme",
+      "authorization_token": "<caller access token>"
     }
   ],
-  "skills": [
+  "tools": [
     {
-      "name": "calculator-usage",
-      "uri": "skill://calculator-usage/SKILL.md"
+      "type": "tool_search_tool_bm25_20251119",
+      "name": "tool_search_tool_bm25"
+    },
+    {
+      "type": "mcp_toolset",
+      "mcp_server_name": "acme",
+      "default_config": {
+        "enabled": true,
+        "defer_loading": true
+      }
     }
   ]
 }
 ```
 
-The model then routes the operation through the same facade:
+The current MCP connector also requires the `mcp-client-2025-11-20` beta. See
+Anthropic's [MCP connector guide](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector)
+for the complete request.
 
-```json
-{
-  "operation": "addition",
-  "arguments": {"a": 1, "b": 2}
-}
+### Companion skills use the same tags
+
+Skills are MCP resources rather than tools. Their frontmatter carries the same
+domain tag as the tools they explain:
+
+```yaml
+---
+name: calculator-usage
+tags: ["maths"]
+---
 ```
 
-The response keeps the category and operation in the result:
+The access middleware combines resource tags with skill frontmatter tags. A
+caller granted `maths` can list and read
+`skill://calculator-usage/SKILL.md`; other callers cannot. The `reports` and
+`english` skills follow the same rule.
 
-```json
-{"category": "maths", "operation": "addition", "result": 3}
-```
+Provider tool search covers tool definitions. A host that uses companion
+skills must list or retrieve MCP resources through its own resource flow. The
+shared tag keeps tool and skill access aligned even though discovery is
+separate.
 
-A direct `addition` call is unavailable to a normal host because `addition` did not appear in `tools/list`. The facade is the route to every hidden member.
+### Hosts without tool search
 
-This sequence shows when each schema enters the model's context and how a hidden member is called:
+A client without deferred search receives every permitted native schema. This
+is often reasonable for a small catalogue.
 
-```mermaid
-sequenceDiagram
-    actor Model
-    participant Host as MCP host
-    participant Server as acme-mcp
+For a large catalogue on a host that cannot defer definitions, a category
+facade remains an available server-side pattern. One broad tool can list and
+dispatch domain operations. Its costs are an extra discovery call, dictionary
+arguments at the facade boundary, custom dispatch code, and loss of native
+member calls from the host's catalogue. Use it only when those costs are lower
+than sending all permitted schemas.
 
-    Host->>Server: tools/list
-    Server-->>Host: perform_maths, member tools hidden
-    Host-->>Model: offer perform_maths schema
+### Adding a domain
 
-    Model->>Host: perform_maths {}
-    Host->>Server: tools/call perform_maths
-    Server->>Server: resolve permitted maths members
-    Server-->>Host: category index and member schemas
-    Host-->>Model: add maths index to context
-
-    Model->>Host: perform_maths {operation: addition}
-    Host->>Server: tools/call perform_maths
-    Server->>Server: authorize and call addition
-    Server-->>Host: {result: 3}
-    Host-->>Model: return result
-```
-
-## Technical detail
-
-### Why the listing controls model access
-
-The server can accept a direct call to a permitted hidden tool, and FastMCP's in-memory `Client` can make that call by name. A real MCP host gives the model the definitions returned by `tools/list`. The model cannot emit a tool call for a definition the host never supplied.
-
-Returning an input schema from `perform_maths` gives the model enough information to prepare arguments. That schema remains result data and does not register `addition` as a model-callable tool. The next call must still use `perform_maths`.
-
-This distinction needs a host-shaped test. A test that calls `Client.call_tool("addition", ...)` only proves that the server will execute the name.
-
-### Access filtering runs first
-
-All domain tools and their facades carry a tag such as `maths` or `english`. `AuthMiddleware` filters the full listing using the caller's group grants. `HideFacadeMembers` receives that filtered list and removes the members of each visible facade.
-
-`HideFacadeMembers` changes `tools/list` only:
-
-```python
-async def on_list_tools(self, context, call_next):
-    tools = await call_next(context)
-    if _listing_for_facade.get():
-        return tools
-
-    doors = {tool.name for tool in tools} & set(self.facades.values())
-    hidden = {tag for tag, name in self.facades.items() if name in doors}
-    return [
-        tool
-        for tool in tools
-        if tool.name in doors or not (hidden & set(tool.tags))
-    ]
-```
-
-Members stay listed when their facade is absent. This prevents the middleware from hiding an allowed tool without leaving the caller a route to it.
-
-The current listing sizes show the effect:
-
-| Group | Before grouping | After grouping |
-| --- | ---: | ---: |
-| `engineering` | 1 | 1 |
-| `finance` | 13 | 5 |
-| `support` | 16 | 8 |
-| `admin` | 17 | 9 |
-
-For finance, two facade definitions replace ten maths and English member definitions. The other three visible business tools stay unchanged.
-
-### Facades discover their members at call time
-
-`_facade` in `src/acme_mcp/server.py` builds its index from the server's current listing:
-
-```python
-with listing_for_facade():
-    listed = await mcp.list_tools()
-
-members = {
-    tool.name: tool
-    for tool in listed
-    if tag in tool.tags and tool.name != name
-}
-```
-
-This uses the caller's active auth context, so the index only contains tools the caller can use. The tag selects the category and the name check excludes the facade itself.
-
-The facade reads live metadata rather than a separate member list. Adding a tagged tool updates the index on the next call and keeps its description and schema aligned with the registered tool.
-
-`listing_for_facade()` temporarily disables member hiding while this internal listing runs. The access middleware stays active. Calling `mcp.list_tools(run_middleware=False)` would bypass access filtering as well, which would expose tools from other grants.
-
-### Dispatch re-enters the middleware pipeline
-
-When the request includes `operation`, the facade checks the caller-scoped `members` mapping and calls the selected tool:
-
-```python
-if operation is not None:
-    if operation not in members:
-        raise ToolError(f"Unknown {tag} operation: {operation}")
-    result = await mcp.call_tool(operation, arguments or {})
-```
-
-The membership check rejects an unknown name, a tool from another category, and a tool filtered by authorization with the same category error. The facade cannot dispatch itself.
-
-`mcp.call_tool` re-enters the normal middleware pipeline. FastMCP applies authorization to the member call and `AuditLog` records it.
-
-### Skills use the same category
-
-Each facade also lists skills whose frontmatter contains its category tag. It excludes provider manifest resources and returns the skill name, description, and `skill://` URI.
-
-The caller can read a returned skill because the access middleware evaluates the same frontmatter tag. A category index therefore cannot advertise a skill that the caller is unable to read.
-
-### Validation trade-offs
-
-Facade arguments arrive as an untyped dictionary because the host only knows the facade's broad `arguments` field. The member tool validates its own signature after dispatch:
-
-```text
-perform_maths {"operation": "division", "arguments": {"a": 1}}
-  1 validation error for call[division]
-  b  Missing required argument
-```
-
-Member `ToolError` values also pass through. Division by zero still returns `division by zero`.
-
-The host cannot validate a hidden member's input before sending the facade call, and it has no member output schema for client-side result validation. Server-side input validation and authorization still run.
-
-Dynamic tool listing offers another design. A server can reveal members after the category is selected and send `notifications/tools/list_changed`. That keeps each member as a first-class tool, but it needs session state and host support for the notification. FastMCP 3.4 has no server-side helper for this flow, so this example uses facade dispatch.
-
-### Adding a category
-
-Tag each member tool:
+Add the domain tag to its tools and companion skills, then grant the tag in
+`GROUP_TAGS`:
 
 ```python
 @reports_server.tool(tags={"reports"})
 def export_report(...): ...
+
+GROUP_TAGS["engineering"] = {"orders", "reports"}
 ```
 
-Grant the tag to the required groups in `GROUP_TAGS`, then register the facade in `build_server`:
-
-```python
-facades = {
-    "reports": _facade(
-        mcp,
-        name="perform_reports",
-        tag="reports",
-        description="List the available reporting tools and companion skills.",
-    ),
-}
-```
-
-Pass that mapping to `HideFacadeMembers`. The facade receives the category tag, so callers without the grant cannot see or call it.
+No search-specific server code is required. Review tool names, descriptions,
+and argument descriptions because those fields drive provider search.
 
 ### Verification
 
-Run the focused tests with the project virtual environment:
+Run the focused discovery tests with the project virtual environment:
 
 ```bash
-.venv/bin/python -m pytest -q tests/test_facades.py tests/test_maths.py tests/test_english.py
+.venv/bin/python -m pytest -q tests/test_tool_discovery.py tests/test_maths.py tests/test_english.py
 ```
 
-The most important cases are:
-
-| Test | Behaviour |
-| --- | --- |
-| `test_a_model_reaches_hidden_members_only_through_the_facade` | Models can reach hidden members through a name present in their toolset |
-| `test_facade_contents_are_scoped_to_the_caller` | The index uses the caller's grants |
-| `test_facade_refuses_anything_outside_its_own_domain` | Cross-category and unknown operations share one failure path |
-| `test_members_stay_listed_when_their_facade_is_not` | Hiding never strands an allowed member |
-
-Run the complete suite before changing middleware order or facade dispatch:
+The tests check native discovery, typed schemas, tag-scoped skills, direct
+calls, and denial outside the caller's grants. Run the complete suite before
+changing server composition or access middleware:
 
 ```bash
 .venv/bin/python -m pytest -q

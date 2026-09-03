@@ -11,7 +11,7 @@ The same access function runs during discovery and use:
 | `tools/list`, `resources/list`, `prompts/list` | The component appears | The component is removed from the response |
 | `tools/call`, `resources/read`, `prompts/get` | The request continues | FastMCP returns an authorization error |
 
-Components include individual tools and category facades such as `perform_maths`. Without a matching tag, FastMCP removes the component from discovery and rejects direct use when someone guesses its name.
+Components include native tools and companion skill resources. Without a matching tag, FastMCP removes the component from discovery and rejects direct use when someone guesses its name.
 
 ## Example
 
@@ -27,19 +27,25 @@ A finance token contains this claim:
 billing, english, maths, public, reports
 ```
 
-The caller can use components carrying any of those tags. The category facades hide their member tools from the top-level listing, so the finance caller currently receives these tool names:
+The caller can use components carrying any of those tags. The finance caller currently receives these native tool names:
 
 ```text
 export_report
 get_invoice
-perform_english
-perform_maths
 whoami
+addition
+subtraction
+multiplication
+division
+vowel_count
+noun_count
+verb_count
+word_count
 ```
 
 The same caller cannot see or call `issue_refund`, which carries the `admin` tag. Any authenticated caller can call `whoami` because it carries the `public` tag.
 
-With `groups: ["engineering"]`, the listing contains only `whoami`. `perform_maths` and `issue_refund` stay out of the listing, and direct calls to either fail the same access check.
+With `groups: ["engineering"]`, the listing contains only `whoami`. `addition` and `issue_refund` stay out of the listing, and direct calls to either fail the same access check.
 
 ## Technical detail
 
@@ -111,11 +117,10 @@ FastMCP 3.4 stores skill tags in skill frontmatter. Component tags do not includ
 
 ```python
 mcp.add_middleware(AuditLog())
-mcp.add_middleware(HideFacadeMembers(facades))
 mcp.add_middleware(build_access_middleware())
 ```
 
-FastMCP executes the access middleware before the facade-hiding middleware processes the returned listing. This means `HideFacadeMembers` only hides members behind a facade that the caller can see.
+FastMCP executes the access middleware when components are listed and when they are used. The listing contains each permitted native tool with its own input schema.
 
 `AuditLog` wraps the full call, including access failures. A denied tool call therefore produces an audit entry such as:
 
@@ -131,11 +136,11 @@ The in-memory client tests produce these counts:
 | --- | ---: | ---: |
 | unauthenticated | 0 | 0 |
 | `["engineering"]` | 1 | 0 |
-| `["finance"]` | 5 | 6 |
-| `["support"]` | 8 | 6 |
-| `["admin"]` | 9 | 6 |
+| `["finance"]` | 11 | 6 |
+| `["support"]` | 14 | 6 |
+| `["admin"]` | 15 | 6 |
 
-`engineering` has no entry in `GROUP_TAGS`, so it receives only the public `whoami` tool. Tool grouping explains why finance and support see fewer tool names than their tag grants allow. See [Tool grouping and surfacing](tool-grouping.md).
+`engineering` has no entry in `GROUP_TAGS`, so it receives only the public `whoami` tool. A capable host can defer and search the permitted native definitions to reduce model context. See [Tag filtering and tool search](tool-grouping.md).
 
 ### Known name-disclosure behaviour
 
@@ -177,7 +182,7 @@ Administrators receive the new domain through `ALL_TAGS`. Every other group rema
 Run the access tests with the project virtual environment:
 
 ```bash
-.venv/bin/python -m pytest -q tests/test_auth.py tests/test_access.py tests/test_audit.py tests/test_facades.py
+.venv/bin/python -m pytest -q tests/test_auth.py tests/test_access.py tests/test_audit.py tests/test_tool_discovery.py
 ```
 
 Run the complete suite before changing the group mapping or middleware order:

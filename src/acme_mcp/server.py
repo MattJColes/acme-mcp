@@ -9,9 +9,6 @@ This is where the pieces fit together, in the order the blog post builds them:
 4. Wrap every tool call in audit logging (:class:`acme_mcp.audit.AuditLog`).
 5. Filter the components each caller sees and can use by their group
    (:func:`acme_mcp.access.build_access_middleware`).
-6. Drop the tools a category facade already fronts from ``tools/list``, so the
-   model reads one line per category instead of every tool in it
-   (:class:`acme_mcp.grouping.HideFacadeMembers`). They stay callable.
 
 A local stdio server is a convenience; a remote HTTP server is production
 infrastructure and gets treated like it. ``main`` runs stdio by default and
@@ -24,7 +21,6 @@ import os
 from pathlib import Path
 
 from fastmcp import FastMCP
-from fastmcp.exceptions import ToolError
 
 from acme_mcp.access import build_access_middleware
 from acme_mcp.audit import AuditLog
@@ -36,7 +32,6 @@ from acme_mcp.domains.maths import maths_server
 from acme_mcp.domains.orders import orders_server
 from acme_mcp.domains.reports import reports_server
 from acme_mcp.domains.support import support_server
-from acme_mcp.grouping import HideFacadeMembers, listing_for_facade
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 
@@ -49,88 +44,6 @@ ANALYTICS_URL = os.environ.get(
     "ACME_MCP_ANALYTICS_URL", "https://analytics.acme.internal/mcp"
 )
 SKILLS_DIR = Path(__file__).parent / "skills"
-
-
-def _facade(mcp: FastMCP, *, name: str, tag: str, description: str) -> str:
-    """Register the single tool that fronts one tagged domain.
-
-    The facade is the only tool from its domain that reaches the model, so it
-    has to do both jobs. Called with no arguments it returns the domain's index
-    (every member's name, description and input schema, plus companion skills).
-    Called with an ``operation`` it runs that member and returns its result.
-
-    Dispatch is not a convenience. A host hands the model exactly the tools that
-    came back from ``tools/list``, so a member hidden from that listing is not
-    in the model's vocabulary and it can never emit a call for one. Publishing
-    the schema in a result does not change that: the schema is result data, not
-    a tool definition. Routing through the facade is what makes a hidden member
-    reachable at all.
-
-    Returns the facade's name, so ``build_server`` can tell
-    :class:`~acme_mcp.grouping.HideFacadeMembers` which door fronts which tag.
-    """
-
-    async def facade(
-        operation: str | None = None, arguments: dict | None = None
-    ) -> dict:
-        # The members, as this caller sees them. Listing through the normal
-        # pipeline is what applies the access check; hiding stands down so the
-        # facade can see what it exists to front.
-        with listing_for_facade():
-            listed = await mcp.list_tools()
-        members = {
-            tool.name: tool
-            for tool in listed
-            if tag in tool.tags and tool.name != name
-        }
-
-        if operation is not None:
-            if operation not in members:
-                # Names an operation this caller cannot reach, whether it is
-                # unknown, another domain's, or one they are not cleared for.
-                raise ToolError(f"Unknown {tag} operation: {operation}")
-            result = await mcp.call_tool(operation, arguments or {})
-            # FastMCP wraps a non-dict return under "result"; unwrap it so the
-            # facade's own "result" key holds the value, not a nested envelope.
-            structured = result.structured_content or {}
-            return {
-                "category": tag,
-                "operation": operation,
-                "result": structured.get("result", structured),
-            }
-
-        skills = []
-        for resource in await mcp.list_resources():
-            info = getattr(resource, "skill_info", None)
-            uri = str(resource.uri)
-            if (
-                info is not None
-                and tag in info.frontmatter.get("tags", [])
-                and uri.endswith("/SKILL.md")
-            ):
-                skills.append(
-                    {
-                        "name": info.name,
-                        "description": info.description,
-                        "uri": uri,
-                    }
-                )
-        return {
-            "category": tag,
-            "description": description,
-            "tools": [
-                {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "input_schema": tool.parameters,
-                }
-                for tool in members.values()
-            ],
-            "skills": skills,
-        }
-
-    mcp.tool(facade, name=name, description=description, tags={tag})
-    return name
 
 
 def build_server(env: str | None = None) -> FastMCP:
@@ -161,27 +74,10 @@ def build_server(env: str | None = None) -> FastMCP:
         mcp.mount(sub)
 
     mcp.add_provider(SkillsDirectoryProvider(roots=SKILLS_DIR))
-    facades = {
-        "maths": _facade(
-            mcp,
-            name="perform_maths",
-            tag="maths",
-            description="List the available maths operations and companion skills.",
-        ),
-        "english": _facade(
-            mcp,
-            name="perform_english",
-            tag="english",
-            description="List the available English analysis tools and companion skills.",
-        ),
-    }
 
-    # Audit first so it wraps the outermost call. Then the two filters, in the
-    # order their results depend on each other: the access middleware runs
-    # innermost and decides who may reach each tool, and HideFacadeMembers sees
-    # what survived that, so it only ever hides behind a door the caller can see.
+    # Audit is registered first so it wraps the access check and records blocked
+    # calls as well as successful ones.
     mcp.add_middleware(AuditLog())
-    mcp.add_middleware(HideFacadeMembers(facades))
     mcp.add_middleware(build_access_middleware())
     return mcp
 
