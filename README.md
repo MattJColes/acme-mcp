@@ -20,7 +20,7 @@ can see how the pieces fit instead of stitching them together yourself.
 | File delivery | `src/acme_mcp/domains/reports.py` + `storage.py` | upload to S3, return a short-lived signed URL — never the bytes |
 | Composition | `src/acme_mcp/server.py` | mount in-process domains; proxy a separately-owned one |
 | Companion skill | `src/acme_mcp/skills/handle-downloads/SKILL.md` | a reports-scoped skill published by the MCP server |
-| Tool grouping | `docs/tool-grouping.md` | how tags gate a listing and category facades index a domain |
+| Tool grouping | `src/acme_mcp/grouping.py` + `docs/tool-grouping.md` | facades front a category; members drop out of `tools/list` but stay callable |
 
 ## Install
 
@@ -68,6 +68,11 @@ Every request is authenticated, then two middleware run:
 1. `AuditLog` records who called what.
 2. FastMCP's `AuthMiddleware` hides components the caller isn't cleared for and
    blocks direct use, so guessing a hidden tool or resource still fails.
+
+A third middleware, `HideFacadeMembers`, then trims the listing only: tools a
+visible `perform_<category>` facade already indexes are dropped from
+`tools/list` but remain callable by name. That is a context-budget measure, not
+an access control one - see `docs/tool-grouping.md`.
 
 The structure behind that: one server, five mounted domain sub-servers, and the
 middleware pipeline every request passes through:

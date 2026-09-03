@@ -12,18 +12,34 @@ from __future__ import annotations
 import pytest
 from fastmcp import Client
 
-from tests.conftest import as_caller, tool_tags
+from tests.conftest import as_caller
 
 MATHS_TOOLS = ["addition", "subtraction", "multiplication", "division"]
 
 
 @pytest.mark.parametrize("tool", MATHS_TOOLS)
-async def test_maths_tools_tagged_maths(server, tool):
+async def test_maths_tools_are_tagged_and_fronted_by_the_facade(server, tool):
+    """The tools are hidden from ``tools/list`` and surfaced by the facade.
+
+    They keep their ``maths`` tag, which is what clears the caller for them and
+    what the facade filters on; hiding is a listing concern, not a tag change.
+    """
     with as_caller(groups=["admin"]):
         async with Client(server) as client:
-            tools = {t.name: t for t in await client.list_tools()}
-    assert tool in tools
-    assert "maths" in tool_tags(tools[tool])
+            listed = {t.name for t in await client.list_tools()}
+            fronted = (await client.call_tool("perform_maths", {})).data["tools"]
+    assert tool not in listed
+    assert tool in {item["name"] for item in fronted}
+    assert "maths" in (await server.get_tool(tool)).tags
+
+    with as_caller(groups=["admin"]):
+        async with Client(server) as client:
+            dispatched = (
+                await client.call_tool(
+                    "perform_maths", {"operation": tool, "arguments": {"a": 6, "b": 3}}
+                )
+            ).data
+    assert dispatched["operation"] == tool
 
 
 async def test_addition_int_and_float(server):

@@ -5,18 +5,34 @@ from __future__ import annotations
 import pytest
 from fastmcp import Client
 
-from tests.conftest import as_caller, tool_tags
+from tests.conftest import as_caller
 
 ENGLISH_TOOLS = ["vowel_count", "noun_count", "verb_count", "word_count"]
 
 
 @pytest.mark.parametrize("tool", ENGLISH_TOOLS)
-async def test_english_tools_tagged_english(server, tool):
+async def test_english_tools_are_tagged_and_fronted_by_the_facade(server, tool):
+    """The tools are hidden from ``tools/list`` and surfaced by the facade.
+
+    They keep their ``english`` tag, which is what clears the caller for them and
+    what the facade filters on; hiding is a listing concern, not a tag change.
+    """
     with as_caller(groups=["admin"]):
         async with Client(server) as client:
-            tools = {t.name: t for t in await client.list_tools()}
-    assert tool in tools
-    assert "english" in tool_tags(tools[tool])
+            listed = {t.name for t in await client.list_tools()}
+            fronted = (await client.call_tool("perform_english", {})).data["tools"]
+    assert tool not in listed
+    assert tool in {item["name"] for item in fronted}
+    assert "english" in (await server.get_tool(tool)).tags
+
+    with as_caller(groups=["admin"]):
+        async with Client(server) as client:
+            dispatched = (
+                await client.call_tool(
+                    "perform_english", {"operation": tool, "arguments": {"text": "a cat ran"}}
+                )
+            ).data
+    assert dispatched["operation"] == tool
 
 
 async def test_vowel_count(server):
